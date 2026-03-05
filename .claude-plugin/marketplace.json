@@ -1,22 +1,22 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "remembrall",
-  "description": "Automatic context handoff system for Claude Code — monitors context window %, auto-triggers handoffs at 30% remaining, and auto-resumes on compaction or /clear",
+  "description": "Context handoff system for Claude Code — session journals, git patch snapshots, team handoffs, smart replay with state verification, and auto-resume on compaction/clear",
   "owner": {
     "name": "cukas"
   },
   "plugins": [
     {
       "name": "remembrall",
-      "description": "Automatic context handoff — monitors context window %, auto-triggers handoffs at 30% remaining, auto-resumes on compaction/clear",
-      "version": "1.0.0",
+      "description": "Context handoff system — session journals, git patch snapshots, team handoffs, smart replay, auto-resume",
+      "version": "2.0.0",
       "author": {
         "name": "cukas"
       },
       "source": "./",
       "category": "productivity",
       "homepage": "https://github.com/cukas/remembrall",
-      "tags": ["context", "handoff", "memory", "session", "productivity"]
+      "tags": ["context", "handoff", "memory", "session", "productivity", "git", "team", "journal", "replay"]
     }
   ]
 }

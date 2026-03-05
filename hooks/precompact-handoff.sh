@@ -41,7 +41,8 @@ if [ -f "$HANDOFF_FILE" ]; then
     exit 0
   fi
   # Never overwrite a skill-generated handoff — it is higher quality
-  if ! grep -q "Type: Auto-generated" "$HANDOFF_FILE" 2>/dev/null; then
+  if ! grep -q "type: auto-generated" "$HANDOFF_FILE" 2>/dev/null && \
+     ! grep -q "Type: Auto-generated" "$HANDOFF_FILE" 2>/dev/null; then
     echo "Handoff exists and was skill-generated. Preserving." >&2
     exit 0
   fi
@@ -57,6 +58,37 @@ FILE_PATHS=$(jq -r '
   select(.name == "Read" or .name == "Write" or .name == "Edit" or .name == "MultiEdit") |
   .input.file_path // .input.path // empty
 ' "$TRANSCRIPT_PATH" 2>/dev/null | sort -u | head -50)
+
+# ─── Git state capture ────────────────────────────────────────────
+BRANCH=""
+COMMIT=""
+PATCH_FILE=""
+if remembrall_git_enabled "$CWD"; then
+  BRANCH=$(git -C "$CWD" branch --show-current 2>/dev/null || echo "")
+  COMMIT=$(git -C "$CWD" rev-parse --short HEAD 2>/dev/null || echo "")
+
+  # Build file list for targeted git diff (only session-touched files)
+  DIFF_FILES=()
+  while IFS= read -r fp; do
+    [ -z "$fp" ] && continue
+    # Only include files that exist or are tracked by git
+    if [ -f "$fp" ] || git -C "$CWD" ls-files --error-unmatch "$fp" >/dev/null 2>&1; then
+      DIFF_FILES+=("$fp")
+    fi
+  done <<< "$FILE_PATHS"
+
+  if [ "${#DIFF_FILES[@]}" -gt 0 ]; then
+    PATCHES_DIR=$(remembrall_patches_dir "$CWD") || true
+    if [ -n "$PATCHES_DIR" ]; then
+      mkdir -p "$PATCHES_DIR"
+      PATCH_FILE="$PATCHES_DIR/patch-${SESSION_ID}.diff"
+      # Capture all uncommitted changes (staged + unstaged) for session files only
+      git -C "$CWD" diff HEAD -- "${DIFF_FILES[@]}" 2>/dev/null > "$PATCH_FILE"
+      # Remove empty patch files
+      [ ! -s "$PATCH_FILE" ] && { rm -f "$PATCH_FILE"; PATCH_FILE=""; }
+    fi
+  fi
+fi
 
 # Errors encountered — extract tool results containing error/fail/exception patterns
 ERRORS_FOUND=$(jq -r '
@@ -96,17 +128,40 @@ RECENT_EXCHANGES=$(jq -r '
   end
 ' "$TRANSCRIPT_PATH" 2>/dev/null | tail -80)
 
-# Build handoff document
-cat > "$HANDOFF_FILE" << 'REMEMBRALL_HANDOFF_END'
+# Build YAML files list
+FILES_YAML=""
+while IFS= read -r fp; do
+  [ -z "$fp" ] && continue
+  FILES_YAML="${FILES_YAML}
+  - ${fp}"
+done <<< "$FILE_PATHS"
+
+# Determine team mode
+TEAM_MODE=$(remembrall_config "team_handoffs" "false")
+
+# Capture timestamp once for consistency
+NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+# Write YAML frontmatter + header
+cat > "$HANDOFF_FILE" << REMEMBRALL_FRONTMATTER
+---
+created: "${NOW}"
+session_id: "${SESSION_ID}"
+project: "${CWD}"
+status: interrupted
+type: auto-generated
+branch: "${BRANCH}"
+commit: "${COMMIT}"
+patch: "${PATCH_FILE}"
+files:${FILES_YAML}
+team: ${TEAM_MODE}
+---
+
 # Session Handoff
 
-REMEMBRALL_HANDOFF_END
-
-# Write metadata (safe — these are controlled values)
-cat >> "$HANDOFF_FILE" << REMEMBRALL_HANDOFF_META
-**Created:** $(date -u +%Y-%m-%dT%H:%M:%SZ)
-**Session ID:** $SESSION_ID
-**Project:** $CWD
+**Created:** ${NOW}
+**Session ID:** ${SESSION_ID}
+**Project:** ${CWD}
 **Reason:** Auto-compaction (context window pressure)
 **Type:** Auto-generated — verify before continuing
 
@@ -119,7 +174,7 @@ Resume the work described below. Check the task list (/tasks) for pending items.
 
 ---
 
-REMEMBRALL_HANDOFF_META
+REMEMBRALL_FRONTMATTER
 
 # Write content sections safely — untrusted content via printf to prevent shell expansion
 {
@@ -153,6 +208,13 @@ REMEMBRALL_HANDOFF_META
   printf '%s\n' "$RECENT_EXCHANGES"
   echo '```'
 } >> "$HANDOFF_FILE"
+
+# Copy to team directory if enabled
+if remembrall_team_enabled; then
+  TEAM_DIR=$(remembrall_team_handoff_dir "$CWD")
+  mkdir -p "$TEAM_DIR"
+  cp "$HANDOFF_FILE" "$TEAM_DIR/"
+fi
 
 # Clean up stale handoffs (older than 24h) for this project
 find "$HANDOFF_DIR" -name "handoff-*.md" -mmin +1440 -delete 2>/dev/null || true

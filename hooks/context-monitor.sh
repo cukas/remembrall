@@ -1,11 +1,17 @@
 #!/usr/bin/env bash
 # UserPromptSubmit hook: monitors actual context % via status-line bridge
-# Triggers structured /handoff at 30% remaining, urgent at 20%
+# Triggers journal checkpoint at 60%, warning at 30%, urgent at 20%
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"
 
 remembrall_require_jq
+
+# Require bc for floating-point comparison
+if ! command -v bc >/dev/null 2>&1; then
+  echo "remembrall: bc not found — context monitor disabled" >&2
+  exit 0
+fi
 
 INPUT=$(cat)
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // "default"')
@@ -50,8 +56,22 @@ if (( $(echo "$REMAINING > 80" | bc -l 2>/dev/null || echo 0) )); then
   exit 0
 fi
 
-# >30% remaining — do nothing
+# >60% remaining — do nothing
+if (( $(echo "$REMAINING > 60" | bc -l 2>/dev/null || echo 0) )); then
+  exit 0
+fi
+
+# <=60% and >30% — JOURNAL CHECKPOINT (nudge once to update running handoff)
 if (( $(echo "$REMAINING > 30" | bc -l 2>/dev/null || echo 0) )); then
+  if [ "$LAST_NUDGE" = "journal" ] || [ "$LAST_NUDGE" = "warning" ] || [ "$LAST_NUDGE" = "urgent" ]; then
+    exit 0
+  fi
+  echo "journal" > "$NUDGE_FILE"
+  cat << EOF
+{
+  "additionalContext": "CONTEXT MONITOR (${REMAINING}% remaining${ESTIMATED}): Context is getting moderate. Update your session handoff now — run /handoff to save current progress as a checkpoint. This is a save point, not an emergency. Continue working after saving."
+}
+EOF
   exit 0
 fi
 
@@ -67,7 +87,7 @@ if (( $(echo "$REMAINING <= 20" | bc -l 2>/dev/null || echo 0) )); then
   echo "urgent" > "$NUDGE_FILE"
   cat << EOF
 {
-  "additionalContext": "CONTEXT MONITOR URGENT (${REMAINING}% remaining${ESTIMATED}): STOP all work immediately. Auto-run /handoff NOW — write to handoff-${SESSION_ID}.md in ${ESCAPED_DIR}/. Then tell the user to /clear and /resume. Do NOT start any new tool calls."
+  "additionalContext": "CONTEXT MONITOR URGENT (${REMAINING}% remaining${ESTIMATED}): STOP all work immediately. Auto-run /handoff NOW — write to handoff-${SESSION_ID}.md in ${ESCAPED_DIR}/. Then tell the user to /clear and /replay. Do NOT start any new tool calls."
 }
 EOF
   exit 0
@@ -80,7 +100,7 @@ fi
 echo "warning" > "$NUDGE_FILE"
 cat << EOF
 {
-  "additionalContext": "CONTEXT MONITOR (${REMAINING}% remaining${ESTIMATED}): Context is getting low. Auto-run /handoff NOW to preserve your work — write to handoff-${SESSION_ID}.md in ${ESCAPED_DIR}/. After writing the handoff, tell the user to /clear and /resume to continue with full context."
+  "additionalContext": "CONTEXT MONITOR (${REMAINING}% remaining${ESTIMATED}): Context is getting low. Auto-run /handoff NOW to preserve your work — write to handoff-${SESSION_ID}.md in ${ESCAPED_DIR}/. After writing the handoff, tell the user to /clear and /replay to continue with full context."
 }
 EOF
 exit 0

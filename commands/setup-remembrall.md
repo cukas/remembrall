@@ -49,3 +49,50 @@ fi;
 - The plugin itself CANNOT modify settings.json — this command guides the user/Claude through the edit
 - If the user doesn't have a status line configured at all, they need to set one up first. Point them to the Claude Code docs on status line configuration.
 - The bridge snippet is idempotent — running it multiple times is harmless
+
+## Optional Features
+
+After the bridge is set up, present these optional features to the user:
+
+8. **Git Integration** — Ask: "Would you like remembrall to save git patches of your session's changes before handoff? Patches are stored in ~/.remembrall/patches/ — your repo stays untouched."
+
+   If yes, run:
+   ```bash
+   source "${CLAUDE_PLUGIN_ROOT}/hooks/lib.sh"
+   remembrall_config_set "git_integration" "true"
+   echo "Git integration enabled"
+   ```
+
+   If no, run:
+   ```bash
+   source "${CLAUDE_PLUGIN_ROOT}/hooks/lib.sh"
+   remembrall_config_set "git_integration" "false"
+   echo "Git integration disabled"
+   ```
+
+9. **Team Handoffs** — Ask: "Would you like handoffs to also be saved in your project directory so other team members' Claude sessions can pick them up?"
+
+   If yes, run:
+   ```bash
+   source "${CLAUDE_PLUGIN_ROOT}/hooks/lib.sh"
+   remembrall_config_set "team_handoffs" "true"
+   echo "Team handoffs enabled"
+   ```
+   Then suggest: "Consider adding `.remembrall/` to your project's `.gitignore` if you don't want handoff files committed."
+
+   If no, run:
+   ```bash
+   source "${CLAUDE_PLUGIN_ROOT}/hooks/lib.sh"
+   remembrall_config_set "team_handoffs" "false"
+   echo "Team handoffs disabled"
+   ```
+
+10. **Show final config** — Display the current configuration:
+    ```bash
+    echo "Current remembrall config:"
+    cat ~/.remembrall/config.json 2>/dev/null || echo "No config file (using defaults)"
+    ```
+
+## Reconfiguring
+
+To change settings later, the user can run `/setup-remembrall` again — it will detect existing config and offer to update it. Or they can edit `~/.remembrall/config.json` directly.

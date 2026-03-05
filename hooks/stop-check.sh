@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Stop hook: if context is low, suggest /clear + /resume before starting new work.
+# Stop hook: if context is low, suggest /clear + /replay before starting new work.
 # This catches the case where Claude finishes a task but context is nearly full.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
@@ -43,5 +43,5 @@ if (( $(echo "$REMAINING >= 40" | bc -l 2>/dev/null || echo 0) )); then
 fi
 
 # Output to stderr — shown to user in terminal without risking Claude re-engagement
-echo "Remembrall: Context is at ${REMAINING}%${ESTIMATED} remaining. Consider /clear + /resume before starting new work." >&2
+echo "Remembrall: Context is at ${REMAINING}%${ESTIMATED} remaining. Consider /clear + /replay before starting new work." >&2
 exit 0

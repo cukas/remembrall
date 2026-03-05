@@ -93,3 +93,91 @@ remembrall_estimate_context() {
     return 1   # Too small to estimate reliably
   fi
 }
+
+# ─── Config ────────────────────────────────────────────────────────
+
+# Read a config value from ~/.remembrall/config.json
+# Usage: remembrall_config "key" "default_value"
+remembrall_config() {
+  local key="$1"
+  local default="$2"
+  local config_file="$HOME/.remembrall/config.json"
+
+  if [ ! -f "$config_file" ]; then
+    echo "$default"
+    return
+  fi
+
+  local value
+  value=$(jq -r --arg k "$key" '.[$k] // empty' "$config_file" 2>/dev/null)
+
+  if [ -z "$value" ]; then
+    echo "$default"
+  else
+    echo "$value"
+  fi
+}
+
+# Write a config value to ~/.remembrall/config.json
+# Creates the file and directory if they don't exist
+remembrall_config_set() {
+  local key="$1"
+  local value="$2"
+  local config_file="$HOME/.remembrall/config.json"
+
+  mkdir -p "$(dirname "$config_file")"
+
+  if [ ! -f "$config_file" ]; then
+    echo '{}' > "$config_file"
+  fi
+
+  local tmp
+  tmp=$(mktemp "${config_file}.XXXXXX")
+  if jq --arg k "$key" --arg v "$value" '.[$k] = $v' "$config_file" > "$tmp" 2>/dev/null; then
+    mv "$tmp" "$config_file"
+  else
+    rm -f "$tmp"
+    return 1
+  fi
+}
+
+# ─── Git Integration ──────────────────────────────────────────────
+
+# Check if git integration is enabled AND cwd is a git repo
+remembrall_git_enabled() {
+  local cwd="$1"
+  [ "$(remembrall_config "git_integration" "false")" = "true" ] || return 1
+  git -C "$cwd" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 1
+}
+
+# Compute patches directory for a project
+remembrall_patches_dir() {
+  local cwd="$1"
+  local hash
+  hash=$(remembrall_md5 "$cwd") || return 1
+  echo "$HOME/.remembrall/patches/$hash"
+}
+
+# ─── Team Handoffs ────────────────────────────────────────────────
+
+# Check if team handoffs are enabled
+remembrall_team_enabled() {
+  [ "$(remembrall_config "team_handoffs" "false")" = "true" ]
+}
+
+# Compute team handoff directory (project-local)
+remembrall_team_handoff_dir() {
+  local cwd="$1"
+  echo "$cwd/.remembrall/handoffs"
+}
+
+# ─── Frontmatter ──────────────────────────────────────────────────
+
+# Parse YAML frontmatter value from a handoff file (scalar values only).
+# Does NOT work for multi-line YAML values like lists (files:, tasks:).
+# Usage: remembrall_frontmatter_get "file.md" "key"
+remembrall_frontmatter_get() {
+  local file="$1"
+  local key="$2"
+  sed -n '/^---$/,/^---$/p' "$file" 2>/dev/null | grep "^${key}:" | sed "s/^${key}: *//"
+}

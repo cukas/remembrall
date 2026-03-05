@@ -54,6 +54,19 @@ else
   done
 fi
 
+# Also check team handoff directory if enabled
+if [ -z "$HANDOFF_FILE" ] && remembrall_team_enabled; then
+  TEAM_DIR=$(remembrall_team_handoff_dir "$CWD")
+  if [ -d "$TEAM_DIR" ]; then
+    for f in "$TEAM_DIR"/handoff-*.md; do
+      [ -f "$f" ] || continue
+      if [ -z "$HANDOFF_FILE" ] || [ "$f" -nt "$HANDOFF_FILE" ]; then
+        HANDOFF_FILE="$f"
+      fi
+    done
+  fi
+fi
+
 # No handoff found
 if [ -z "$HANDOFF_FILE" ] || [ ! -f "$HANDOFF_FILE" ]; then
   exit 0
@@ -72,6 +85,18 @@ mv "$HANDOFF_FILE" "$CLAIMED_FILE" 2>/dev/null || exit 0
 
 # Read handoff content
 CONTENT=$(cat "$CLAIMED_FILE")
+
+# Extract frontmatter metadata if present
+PATCH_PATH=$(remembrall_frontmatter_get "$CLAIMED_FILE" "patch")
+FM_BRANCH=$(remembrall_frontmatter_get "$CLAIMED_FILE" "branch")
+FM_COMMIT=$(remembrall_frontmatter_get "$CLAIMED_FILE" "commit")
+
+GIT_CONTEXT=""
+if [ -n "$PATCH_PATH" ] && [ -f "$PATCH_PATH" ]; then
+  PATCH_LINES=$(wc -l < "$PATCH_PATH" | tr -d ' ')
+  GIT_RAW="GIT STATE: Branch was '${FM_BRANCH}', commit was '${FM_COMMIT}'. A patch file exists at ${PATCH_PATH} (${PATCH_LINES} lines) with the session's uncommitted changes. Use /replay to verify and restore."
+  GIT_CONTEXT="\\n\\n$(remembrall_escape_json "$GIT_RAW")"
+fi
 
 # Count other handoff files (for awareness) — using glob, not ls
 OTHER_COUNT=0
@@ -96,7 +121,7 @@ cat <<EOF
 {
   "hookSpecificOutput": {
     "hookEventName": "SessionStart",
-    "additionalContext": "SESSION HANDOFF LOADED — Resume the work described below. Summarize to the user what was being worked on, what was completed, and what remains. Ask if they want to continue.\n\n${ESCAPED_CONTENT}${ESCAPED_NOTE}"
+    "additionalContext": "SESSION HANDOFF LOADED — Resume the work described below. Summarize to the user what was being worked on, what was completed, and what remains. Ask if they want to continue.\n\n${ESCAPED_CONTENT}${GIT_CONTEXT}${ESCAPED_NOTE}"
   }
 }
 EOF
