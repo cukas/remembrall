@@ -38,7 +38,7 @@ if [ -z "$REMAINING" ]; then
 fi
 
 # Only suggest if below 40%
-if (( $(echo "$REMAINING >= 40" | bc -l 2>/dev/null || echo 0) )); then
+if remembrall_ge "$REMAINING" 40; then
   exit 0
 fi
 

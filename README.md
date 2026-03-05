@@ -6,6 +6,12 @@ Remembrall monitors your context window in real-time, keeps a running session jo
 
 ## What's New in v2
 
+- **Zero-Setup Experience** — Remembrall works out of the box with no manual configuration. The self-calibrating transcript estimator learns your context window size after 1-2 compaction events, improving accuracy automatically. The optional status-line bridge is still supported for maximum precision but is no longer required.
+
+- **No External Dependencies** — Removed the `bc` requirement. All comparisons use integer arithmetic. Only `jq` is required (and hooks exit gracefully without it).
+
+- **Single-Script Handoff** — The `/handoff` skill now pipes content to a single `handoff-create.sh` script that handles path computation, git patches, YAML frontmatter, and team copies. More reliable than multi-step orchestration.
+
 - **Session Journal** — At 60% context remaining, Remembrall starts nudging Claude to maintain a running journal checkpoint. This keeps the handoff document up-to-date incrementally, so nothing is lost if compaction happens suddenly.
 
 - **Git Patch Snapshots** — Before handoff, Remembrall captures uncommitted changes for session-touched files only. Patches are stored in `~/.remembrall/patches/` — your repo stays clean (no WIP commits, no stashes).
@@ -20,7 +26,7 @@ Remembrall monitors your context window in real-time, keeps a running session jo
 
 ## How It Works
 
-> **Note:** For best accuracy, run `/setup-remembrall` to set up the status-line bridge. Without it, the context monitor falls back to transcript-size estimation (less accurate but still functional). The safety net and auto-resume layers work without any setup.
+> **Zero-setup by default.** Remembrall works out of the box using self-calibrating transcript estimation. After 1-2 sessions, the estimator learns your typical context window size and triggers accurately. For maximum precision, you can optionally run `/setup-remembrall` to set up the status-line bridge — but it's not required.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -86,7 +92,7 @@ Remembrall monitors your context window in real-time, keeps a running session jo
 
 3. **Safety Net** (`precompact-handoff.sh`) — If the early warning is missed and Claude auto-compacts, this hook extracts files touched, errors encountered, git operations, task state, and recent conversation from the transcript into a handoff document. Also captures git patches of session-touched files when git integration is enabled. Will not overwrite a higher-quality skill-generated handoff.
 
-4. **Auto-Resume** (`session-resume.sh`) — On session start after compaction or `/clear`, injects the handoff content directly into Claude's context so it picks up where it left off. On fresh session starts, checks if the bridge is configured and nudges setup if missing.
+4. **Auto-Resume** (`session-resume.sh`) — On session start after compaction or `/clear`, injects the handoff content directly into Claude's context so it picks up where it left off.
 
 5. **Stop Check** (`stop-check.sh`) — When Claude finishes a task, checks if context is below 40% and suggests `/clear` + `/replay` before starting new work.
 
@@ -106,9 +112,13 @@ Add to `~/.claude/settings.json`:
 
 Or install from the plugin marketplace if available.
 
-### 2. Set up the bridge (optional but recommended)
+### 2. Verify
 
-Run `/setup-remembrall` in Claude Code. This adds a small snippet to your status line that writes context % to a temp file that the hooks can read. Without the bridge, the context monitor falls back to transcript-size estimation (less accurate but still functional). On each fresh session start, Remembrall will remind you once if the bridge is not configured.
+Run `/remembrall-status` to check everything is working. That's it — Remembrall works out of the box.
+
+### 3. Optional: Set up the status-line bridge (for maximum precision)
+
+The self-calibrating estimator is accurate after 1-2 sessions. For immediate precision on the first session, you can optionally run `/setup-remembrall` to install a status-line bridge that writes exact context % to a temp file.
 
 The bridge snippet (added inside your existing `if [ -n "$remaining" ]; then ... fi` block):
 
@@ -120,10 +130,6 @@ elif command -v md5sum >/dev/null 2>&1; then
   printf "%s" "$remaining" > "$CTX_DIR/$(printf '%s' "$cwd" | md5sum | cut -d' ' -f1)" 2>/dev/null;
 fi;
 ```
-
-### 3. Verify
-
-Run `/remembrall-status` to check everything is working.
 
 ## Configuration
 
@@ -147,6 +153,12 @@ Remembrall uses `~/.remembrall/config.json` for persistent settings. Run `/setup
 
 Settings apply globally — once configured, all Claude sessions respect them. Values are stored as native JSON types (booleans, numbers).
 
+## Self-Calibrating Context Estimation
+
+Remembrall estimates how much context remains by measuring the transcript file size against a known maximum. On the first session, it uses a conservative default (256KB). After each compaction event, it records the actual transcript size where context ran out. After 1-2 compactions, the estimator uses the average of observed values — becoming accurate for your specific usage patterns.
+
+Calibration data is stored at `~/.remembrall/calibration.json` and persists across sessions. If you want to reset calibration (e.g., after changing models), delete this file.
+
 ## Git Integration
 
 When enabled, Remembrall captures git patches of your session's uncommitted changes before handoff. Only files touched by Claude during the session are included — your other work is untouched.
@@ -168,9 +180,17 @@ When enabled, handoffs are also saved in your project directory at `.remembrall/
 
 - Claude Code with plugin support
 - `jq` — required; hooks exit gracefully if missing but will not function
-- `bc` — required for the context monitor; without it, the early warning layer is disabled (safety net and auto-resume still work)
-- `md5` (macOS) or `md5sum` (Linux) — required for project hashing
+- `md5` (macOS) or `md5sum` (Linux/WSL) — required for project hashing
 - `git` — optional; only needed when `git_integration` is enabled
+
+### Platform Support
+
+| Platform | Status |
+|----------|--------|
+| macOS | Fully supported (`md5`, `stat -f`) |
+| Linux | Fully supported (`md5sum`, `stat -c`) |
+| WSL (Windows Subsystem for Linux) | Fully supported (uses Linux userspace) |
+| Windows (native) | Not supported — use WSL |
 
 After cloning, ensure hook scripts are executable:
 

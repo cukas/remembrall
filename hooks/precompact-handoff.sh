@@ -23,6 +23,9 @@ if [ -z "$TRANSCRIPT_PATH" ] || [ ! -f "$TRANSCRIPT_PATH" ]; then
   exit 0
 fi
 
+# Calibrate: record transcript size for future context estimation
+remembrall_calibrate "$TRANSCRIPT_PATH"
+
 # Exit if CWD not available
 if [ -z "$CWD" ]; then
   exit 0
@@ -230,7 +233,9 @@ fi
 # Clean up stale handoffs based on configurable retention (default: 72h)
 RETENTION_HOURS=$(remembrall_retention_hours)
 RETENTION_MINS=$((RETENTION_HOURS * 60))
-find "$HANDOFF_DIR" -name "handoff-*.md" -mmin +"$RETENTION_MINS" -delete 2>/dev/null || true
+if [ "$RETENTION_MINS" -gt 0 ] 2>/dev/null; then
+  find "$HANDOFF_DIR" -name "handoff-*.md" -mmin +"$RETENTION_MINS" -delete 2>/dev/null || true
+fi
 
 # Signal to Claude that handoff was created
 echo "Context is being compacted. Handoff saved to $HANDOFF_FILE — it will be loaded automatically on next session start." >&2

@@ -7,12 +7,6 @@ source "$SCRIPT_DIR/lib.sh"
 
 remembrall_require_jq
 
-# Require bc for floating-point comparison
-if ! command -v bc >/dev/null 2>&1; then
-  echo "remembrall: bc not found — context monitor disabled" >&2
-  exit 0
-fi
-
 INPUT=$(cat)
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // "default"')
 CWD=$(echo "$INPUT" | jq -r '.cwd // empty')
@@ -51,18 +45,18 @@ if [ -f "$NUDGE_FILE" ]; then
 fi
 
 # Reset nudge state if context recovered (post-compaction: remaining > 80%)
-if (( $(echo "$REMAINING > 80" | bc -l 2>/dev/null || echo 0) )); then
+if remembrall_gt "$REMAINING" 80; then
   rm -f "$NUDGE_FILE"
   exit 0
 fi
 
 # >60% remaining — do nothing
-if (( $(echo "$REMAINING > 60" | bc -l 2>/dev/null || echo 0) )); then
+if remembrall_gt "$REMAINING" 60; then
   exit 0
 fi
 
 # <=60% and >30% — JOURNAL CHECKPOINT (nudge once to update running handoff)
-if (( $(echo "$REMAINING > 30" | bc -l 2>/dev/null || echo 0) )); then
+if remembrall_gt "$REMAINING" 30; then
   if [ "$LAST_NUDGE" = "journal" ] || [ "$LAST_NUDGE" = "warning" ] || [ "$LAST_NUDGE" = "urgent" ]; then
     exit 0
   fi
@@ -80,7 +74,7 @@ HANDOFF_DIR=$(remembrall_handoff_dir "$CWD") || exit 0
 ESCAPED_DIR=$(remembrall_escape_json "$HANDOFF_DIR")
 
 # <=20% — URGENT (only suppress if urgent already sent; allows escalation from warning)
-if (( $(echo "$REMAINING <= 20" | bc -l 2>/dev/null || echo 0) )); then
+if remembrall_le "$REMAINING" 20; then
   if [ "$LAST_NUDGE" = "urgent" ]; then
     exit 0
   fi

@@ -73,10 +73,12 @@ remembrall_validate_number() {
 # Used as a fallback when the status-line bridge is not configured.
 # Returns estimated remaining % on stdout, or exits 1 if no estimate possible.
 #
-# Uses configurable max_transcript_kb (default: 256) to scale thresholds.
-# The default assumes ~256KB of JSONL transcript ≈ a full context window.
-# Adjust via: remembrall_config_set "max_transcript_kb" "512"
-# Conservative: triggers earlier rather than later.
+# Self-calibrating: after the first compaction, remembrall records the actual
+# transcript size at which context ran out. Subsequent sessions use the
+# calibrated value instead of the default, improving accuracy over time.
+#
+# Uses configurable max_transcript_kb (default: 256) as initial seed.
+# After 1-2 compaction events the calibrated value takes over automatically.
 remembrall_estimate_context() {
   local transcript_path="$1"
   if [ -z "$transcript_path" ] || [ ! -f "$transcript_path" ]; then
@@ -87,17 +89,21 @@ remembrall_estimate_context() {
   size=$(wc -c < "$transcript_path" 2>/dev/null) || return 1
   size=$(echo "$size" | tr -d ' ')
 
-  local max_kb
-  max_kb=$(remembrall_config "max_transcript_kb" "256")
-  if ! [[ "$max_kb" =~ ^[0-9]+$ ]]; then
-    max_kb=256
+  # Use calibrated max if available, otherwise fall back to config/default
+  local max_bytes
+  max_bytes=$(remembrall_calibrated_max)
+  if [ -z "$max_bytes" ] || [ "$max_bytes" -eq 0 ] 2>/dev/null; then
+    local max_kb
+    max_kb=$(remembrall_config "max_transcript_kb" "256")
+    if ! [[ "$max_kb" =~ ^[0-9]+$ ]]; then
+      max_kb=256
+    fi
+    max_bytes=$((max_kb * 1024))
   fi
-  local max_bytes=$((max_kb * 1024))
 
-  # Estimate remaining % as inverse of transcript fill ratio
-  # size/max_bytes = used fraction → remaining = 100 - used%
+  # Too small to estimate reliably (<40% of expected max)
   if [ "$size" -lt $((max_bytes * 40 / 100)) ]; then
-    return 1  # Too small to estimate reliably (<40% of expected max)
+    return 1
   fi
 
   local used_pct=$((size * 100 / max_bytes))
@@ -112,6 +118,90 @@ remembrall_estimate_context() {
   fi
 
   echo "$remaining"
+}
+
+# ─── Calibration ──────────────────────────────────────────────────
+
+# Record transcript size at compaction for future estimation.
+# Called by precompact-handoff.sh when context pressure triggers compaction.
+# Stores last 5 measurements and uses the average as the calibrated max.
+remembrall_calibrate() {
+  local transcript_path="$1"
+  if [ -z "$transcript_path" ] || [ ! -f "$transcript_path" ]; then
+    return 1
+  fi
+
+  local size
+  size=$(wc -c < "$transcript_path" 2>/dev/null) || return 1
+  size=$(echo "$size" | tr -d ' ')
+
+  # Ignore tiny transcripts (likely not real compaction)
+  if [ "$size" -lt 50000 ]; then
+    return 0
+  fi
+
+  local cal_file="$HOME/.remembrall/calibration.json"
+  mkdir -p "$HOME/.remembrall"
+
+  if [ ! -f "$cal_file" ]; then
+    echo '{"samples":[]}' > "$cal_file"
+  fi
+
+  # Append sample (keep last 5)
+  local tmp
+  tmp=$(mktemp "${cal_file}.XXXXXX")
+  jq --argjson s "$size" '
+    .samples += [$s] |
+    .samples = .samples[-5:] |
+    .updated = now
+  ' "$cal_file" > "$tmp" 2>/dev/null && mv "$tmp" "$cal_file" || rm -f "$tmp"
+}
+
+# Get calibrated max transcript size in bytes (average of stored samples).
+# Returns empty string if no calibration data exists.
+remembrall_calibrated_max() {
+  local cal_file="$HOME/.remembrall/calibration.json"
+  if [ ! -f "$cal_file" ]; then
+    echo ""
+    return
+  fi
+
+  local avg
+  avg=$(jq -r '
+    if (.samples | length) > 0 then
+      ((.samples | add) / (.samples | length)) | floor
+    else
+      empty
+    end
+  ' "$cal_file" 2>/dev/null)
+
+  echo "$avg"
+}
+
+# ─── Integer Comparison ──────────────────────────────────────────
+
+# Compare a number (possibly decimal) against an integer threshold.
+# Usage: remembrall_gt "$REMAINING" 60 → returns 0 (true) if REMAINING > 60
+# Truncates decimals — "42.7" becomes 42. No bc dependency.
+remembrall_gt() {
+  local val="${1%%.*}"  # truncate decimal
+  local threshold="$2"
+  [ -z "$val" ] && return 1
+  [ "$val" -gt "$threshold" ] 2>/dev/null
+}
+
+remembrall_le() {
+  local val="${1%%.*}"
+  local threshold="$2"
+  [ -z "$val" ] && return 1
+  [ "$val" -le "$threshold" ] 2>/dev/null
+}
+
+remembrall_ge() {
+  local val="${1%%.*}"
+  local threshold="$2"
+  [ -z "$val" ] && return 1
+  [ "$val" -ge "$threshold" ] 2>/dev/null
 }
 
 # ─── Config ────────────────────────────────────────────────────────

@@ -17,18 +17,8 @@ if [ -z "$CWD" ]; then
   exit 0
 fi
 
-# For fresh session starts (not compact/clear): check bridge and nudge if missing
+# For fresh session starts (not compact/clear): just exit (bridge is optional now)
 if [ "$SOURCE" != "compact" ] && [ "$SOURCE" != "clear" ]; then
-  if ! remembrall_find_bridge "$CWD" >/dev/null 2>&1; then
-    cat <<EOF
-{
-  "hookSpecificOutput": {
-    "hookEventName": "SessionStart",
-    "additionalContext": "Remembrall: The context-monitor bridge is not set up. Run /setup-remembrall to enable real-time context tracking. Without it, Remembrall falls back to transcript-size estimation (less accurate). The safety net and auto-resume layers still work."
-  }
-}
-EOF
-  fi
   exit 0
 fi
 

@@ -201,6 +201,37 @@ remembrall_config_set "team_handoffs" "true"
 remembrall_team_enabled && R=true || R=false
 assert_eq "team enabled after config set" "true" "$R"
 
+# ── remembrall_gt / remembrall_le / remembrall_ge ────────────────
+echo ""
+echo "remembrall_gt / remembrall_le / remembrall_ge (integer comparisons):"
+
+remembrall_gt "85" 60 && R=true || R=false
+assert_eq "85 > 60 = true" "true" "$R"
+
+remembrall_gt "42" 60 && R=true || R=false
+assert_eq "42 > 60 = false" "false" "$R"
+
+remembrall_gt "60" 60 && R=true || R=false
+assert_eq "60 > 60 = false" "false" "$R"
+
+remembrall_gt "42.7" 42 && R=true || R=false
+assert_eq "42.7 > 42 = false (truncates)" "false" "$R"
+
+remembrall_le "15" 20 && R=true || R=false
+assert_eq "15 <= 20 = true" "true" "$R"
+
+remembrall_le "25" 20 && R=true || R=false
+assert_eq "25 <= 20 = false" "false" "$R"
+
+remembrall_ge "40" 40 && R=true || R=false
+assert_eq "40 >= 40 = true" "true" "$R"
+
+remembrall_ge "35" 40 && R=true || R=false
+assert_eq "35 >= 40 = false" "false" "$R"
+
+remembrall_gt "" 60 && R=true || R=false
+assert_eq "empty > 60 = false" "false" "$R"
+
 # ── remembrall_estimate_context ───────────────────────────────────
 echo ""
 echo "remembrall_estimate_context:"
@@ -233,6 +264,45 @@ R=$(remembrall_estimate_context "$LARGE_FILE") && STATUS=0 || STATUS=1
 assert_eq "with larger window, 200KB is too small to estimate" "1" "$STATUS"
 rm -f "$HOME/.remembrall/config.json"
 
+# ── remembrall_calibrate / remembrall_calibrated_max ──────────────
+echo ""
+echo "remembrall_calibrate / remembrall_calibrated_max:"
+
+rm -f "$HOME/.remembrall/calibration.json"
+
+# No calibration data
+R=$(remembrall_calibrated_max)
+assert_eq "no calibration returns empty" "" "$R"
+
+# Calibrate with a 200KB transcript
+CAL_FILE="$TMPDIR_ROOT/cal_transcript.jsonl"
+dd if=/dev/zero bs=1024 count=200 of="$CAL_FILE" 2>/dev/null
+remembrall_calibrate "$CAL_FILE"
+R=$(remembrall_calibrated_max)
+assert_match "calibrated max is ~200KB" '^20[0-9][0-9][0-9][0-9]$' "$R"
+
+# Second calibration with 250KB — average should shift
+CAL_FILE2="$TMPDIR_ROOT/cal_transcript2.jsonl"
+dd if=/dev/zero bs=1024 count=250 of="$CAL_FILE2" 2>/dev/null
+remembrall_calibrate "$CAL_FILE2"
+R=$(remembrall_calibrated_max)
+assert_match "calibrated max shifts with 2nd sample" '^2[0-9][0-9][0-9][0-9][0-9]$' "$R"
+
+# Calibration with estimation — calibrated value should be used
+R=$(remembrall_estimate_context "$MED_FILE")
+# With calibrated max ~225KB, 153KB is ~68% used → ~32% remaining
+assert_match "calibrated estimation uses learned max" '^(2[0-9]|3[0-9]|4[0-9])$' "$R"
+
+# Tiny transcript should not calibrate
+TINY_FILE="$TMPDIR_ROOT/tiny_transcript.jsonl"
+dd if=/dev/zero bs=1024 count=10 of="$TINY_FILE" 2>/dev/null
+rm -f "$HOME/.remembrall/calibration.json"
+remembrall_calibrate "$TINY_FILE"
+R=$(remembrall_calibrated_max)
+assert_eq "tiny transcript not calibrated" "" "$R"
+
+rm -f "$HOME/.remembrall/calibration.json"
+
 # ── remembrall_file_age ───────────────────────────────────────────
 echo ""
 echo "remembrall_file_age:"
@@ -259,9 +329,6 @@ assert_eq "finds bridge for exact cwd" "$CTX_DIR/$HASH" "$R"
 
 # Test parent directory walk
 R=$(remembrall_find_bridge "/tmp/test-bridge-project/src/deep/path")
-# Should NOT find it (parent is /tmp/test-bridge-project but hash is for exact path)
-# Actually the walk checks /tmp/test-bridge-project/src/deep/path, then /tmp/test-bridge-project/src/deep, etc.
-# It should find /tmp/test-bridge-project if it walks far enough
 assert_eq "finds bridge via parent walk" "$CTX_DIR/$HASH" "$R"
 
 # Cleanup bridge
@@ -361,11 +428,11 @@ rm -f "/tmp/remembrall-nudges/test-sess"
 echo ""
 echo "session-resume.sh:"
 
-# Fresh start without bridge — should nudge setup
+# Fresh start — should exit silently (no bridge nudge anymore)
 TEST_CWD="/tmp/remembrall-test-resume-$$"
 mkdir -p "$TEST_CWD"
 OUTPUT=$(echo '{"source":"fresh","session_id":"test-resume","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/session-resume.sh" 2>/dev/null)
-assert_match "fresh start without bridge: nudges setup" "setup-remembrall" "$OUTPUT"
+assert_eq "fresh start: silent (no bridge nudge)" "" "$OUTPUT"
 
 # Compact resume with handoff file
 HASH=$(remembrall_md5 "$TEST_CWD")
@@ -439,18 +506,50 @@ assert_match "fallback uses timestamp" 'handoff-[0-9]+\.md$' "$OUTPUT"
 
 rm -rf "$TEST_CWD"
 
+# ── handoff-create.sh ────────────────────────────────────────────
+echo ""
+echo "handoff-create.sh:"
+
+TEST_CWD="/tmp/remembrall-test-create-$$"
+mkdir -p "$TEST_CWD"
+export CLAUDE_SESSION_ID="test-create-sess"
+rm -f "$HOME/.remembrall/config.json"
+
+OUTPUT=$(echo "# Test Handoff
+
+**Task:** Build the widget
+
+## Completed
+- Created widget.ts
+
+## Remaining
+- Add tests" | bash "$PLUGIN_ROOT/scripts/handoff-create.sh" --cwd "$TEST_CWD" --status "in_progress" --files "widget.ts,test.ts" --tasks "Add tests" "Deploy" 2>/dev/null)
+
+assert_match "outputs handoff path" 'handoff-test-create-sess\.md$' "$OUTPUT"
+
+# Verify file was created and has correct content
+if [ -f "$OUTPUT" ]; then
+  assert_match "handoff has YAML frontmatter" '^---' "$(head -1 "$OUTPUT")"
+  assert_match "handoff has session_id" 'session_id.*test-create-sess' "$(cat "$OUTPUT")"
+  assert_match "handoff has status" 'status: in_progress' "$(cat "$OUTPUT")"
+  assert_match "handoff has files" 'widget.ts' "$(cat "$OUTPUT")"
+  assert_match "handoff has tasks" 'Add tests' "$(cat "$OUTPUT")"
+  assert_match "handoff has markdown content" 'Build the widget' "$(cat "$OUTPUT")"
+else
+  printf "${RED}  FAIL${RESET} handoff file was not created at: %s\n" "$OUTPUT"
+  FAIL=$((FAIL + 1))
+fi
+
+rm -rf "$TEST_CWD"
+HASH=$(remembrall_md5 "$TEST_CWD")
+rm -rf "$HOME/.remembrall/handoffs/$HASH"
+unset CLAUDE_SESSION_ID
+
 
 # ═══════════════════════════════════════════════════════════════════
 echo ""
 echo "Edge case tests"
 echo "════════════════"
-
-echo ""
-echo "Missing dependencies:"
-
-# context-monitor without bc
-OUTPUT=$(PATH="/usr/bin" echo '{"session_id":"x","cwd":"/tmp"}' | bash -c 'export PATH="/usr/bin:/bin"; source "'"$PLUGIN_ROOT"'/hooks/lib.sh"; exec bash "'"$PLUGIN_ROOT"'/hooks/context-monitor.sh"' 2>&1) || true
-# The script should exit 0 gracefully — just checking it doesn't crash
 
 echo ""
 echo "Handoff chains (remembrall_previous_session):"
@@ -527,6 +626,19 @@ assert_eq "sess-A handoff consumed" "consumed" "$R"
 assert_eq "sess-B handoff preserved" "preserved" "$R"
 
 rm -rf "$TEST_CWD" "$HANDOFF_DIR"
+
+echo ""
+echo "Retention guard (find -delete safety):"
+# Verify retention_hours returns safe values
+rm -f "$HOME/.remembrall/config.json"
+VAL=$(remembrall_retention_hours)
+assert_eq "default retention is 72" "72" "$VAL"
+
+# Set invalid value — should fall back to 72
+echo '{"retention_hours": "abc"}' > "$HOME/.remembrall/config.json"
+VAL=$(remembrall_retention_hours)
+assert_eq "invalid retention falls back to 72" "72" "$VAL"
+rm -f "$HOME/.remembrall/config.json"
 
 
 # ═══════════════════════════════════════════════════════════════════
