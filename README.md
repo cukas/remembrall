@@ -24,6 +24,13 @@ Remembrall monitors your context window in real-time, keeps a running session jo
 
 - **Global Config** — One-time setup at `~/.remembrall/config.json` persists settings across all sessions. Configure git integration and team handoffs once, and every Claude session respects them.
 
+- **Visual Context Gauge** — Color-coded progress bar in all nudge messages so you can see context health at a glance:
+  ```
+  🟢 [████████░░] 80%   — plenty of room
+  🟠 [████░░░░░░] 40%   — journal checkpoint / warning
+  🔴 [██░░░░░░░░] 15%   — urgent, run /handoff now
+  ```
+
 ## How It Works
 
 > **Zero-setup by default.** Remembrall works out of the box using self-calibrating transcript estimation. After 1-2 sessions, the estimator learns your typical context window size and triggers accurately. For maximum precision, you can optionally run `/setup-remembrall` to set up the status-line bridge — but it's not required.
