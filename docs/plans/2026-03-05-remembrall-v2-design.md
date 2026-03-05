@@ -119,7 +119,7 @@ remembrall_frontmatter_get() {
 
 **Step 2: Verify lib.sh loads correctly**
 
-Run: `bash -n /Users/nicolascukas/Web/remembrall/hooks/lib.sh`
+Run: `bash -n ${PLUGIN_ROOT}/hooks/lib.sh`
 Expected: No output (no syntax errors)
 
 **Step 3: Commit**
@@ -187,7 +187,7 @@ team: false
 
 **Step 2: Verify SKILL.md is valid markdown**
 
-Run: `head -5 /Users/nicolascukas/Web/remembrall/skills/handoff/SKILL.md`
+Run: `head -5 ${PLUGIN_ROOT}/skills/handoff/SKILL.md`
 Expected: YAML frontmatter with `---` and skill metadata
 
 **Step 3: Commit**
@@ -291,7 +291,7 @@ fi
 
 **Step 2: Verify syntax**
 
-Run: `bash -n /Users/nicolascukas/Web/remembrall/hooks/precompact-handoff.sh`
+Run: `bash -n ${PLUGIN_ROOT}/hooks/precompact-handoff.sh`
 Expected: No output (no syntax errors)
 
 **Step 3: Commit**
@@ -346,7 +346,7 @@ And restructure the flow: 60% → journal, 30% → warning, 20% → urgent.
 
 **Step 3: Verify syntax**
 
-Run: `bash -n /Users/nicolascukas/Web/remembrall/hooks/context-monitor.sh`
+Run: `bash -n ${PLUGIN_ROOT}/hooks/context-monitor.sh`
 Expected: No output
 
 **Step 4: Commit**
@@ -405,7 +405,7 @@ fi
 
 **Step 2: Verify syntax**
 
-Run: `bash -n /Users/nicolascukas/Web/remembrall/hooks/session-resume.sh`
+Run: `bash -n ${PLUGIN_ROOT}/hooks/session-resume.sh`
 Expected: No output
 
 **Step 3: Commit**
@@ -425,7 +425,7 @@ git commit -m "feat: session resume with YAML frontmatter, team handoffs, git co
 **Step 1: Rename skill directory**
 
 ```bash
-mv /Users/nicolascukas/Web/remembrall/skills/resume /Users/nicolascukas/Web/remembrall/skills/replay
+mv ${PLUGIN_ROOT}/skills/resume ${PLUGIN_ROOT}/skills/replay
 ```
 
 **Step 2: Write new SKILL.md for /replay**
