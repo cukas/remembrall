@@ -2,7 +2,10 @@
 # PreCompact hook: safety-net handoff before context compaction
 # Extracts structured info from transcript, writes per-session handoff file
 
-set -e
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+source "$SCRIPT_DIR/lib.sh"
+
+remembrall_require_jq
 
 INPUT=$(cat)
 TRIGGER=$(echo "$INPUT" | jq -r '.trigger // empty')
@@ -25,40 +28,34 @@ if [ -z "$CWD" ]; then
   exit 0
 fi
 
-# Cross-platform md5 hash of CWD
-if command -v md5 >/dev/null 2>&1; then
-  CWD_HASH=$(md5 -qs "$CWD")
-elif command -v md5sum >/dev/null 2>&1; then
-  CWD_HASH=$(printf '%s' "$CWD" | md5sum | cut -d' ' -f1)
-else
-  exit 0
-fi
-
-HANDOFF_DIR="$HOME/.remembrall/handoffs/$CWD_HASH"
+HANDOFF_DIR=$(remembrall_handoff_dir "$CWD") || exit 0
 HANDOFF_FILE="$HANDOFF_DIR/handoff-${SESSION_ID}.md"
 mkdir -p "$HANDOFF_DIR"
 
 # Skip if a handoff for this session already exists and is < 5 min old
+# Also skip if the existing handoff was skill-generated (higher quality than auto)
 if [ -f "$HANDOFF_FILE" ]; then
-  if [ "$(uname)" = "Darwin" ]; then
-    FILE_AGE=$(( $(date +%s) - $(stat -f %m "$HANDOFF_FILE") ))
-  else
-    FILE_AGE=$(( $(date +%s) - $(stat -c %Y "$HANDOFF_FILE") ))
-  fi
+  FILE_AGE=$(remembrall_file_age "$HANDOFF_FILE")
   if [ "$FILE_AGE" -lt 300 ]; then
     echo "Handoff already exists and is recent (${FILE_AGE}s old). Skipping." >&2
+    exit 0
+  fi
+  # Never overwrite a skill-generated handoff — it is higher quality
+  if ! grep -q "Type: Auto-generated" "$HANDOFF_FILE" 2>/dev/null; then
+    echo "Handoff exists and was skill-generated. Preserving." >&2
     exit 0
   fi
 fi
 
 # Extract structured info from JSONL transcript
-# File paths from tool uses
+# Claude Code transcripts nest tool uses inside content arrays:
+#   {"type":"assistant","content":[{"type":"tool_use","name":"Read","input":{"file_path":"..."}}]}
 FILE_PATHS=$(jq -r '
-  select(.tool_use != null) |
-  .tool_use |
-  if .name == "Read" or .name == "Write" or .name == "Edit" then
-    .input.file_path // .input.path // empty
-  else empty end
+  select(.type == "assistant" and .content != null) |
+  .content[]? |
+  select(.type == "tool_use") |
+  select(.name == "Read" or .name == "Write" or .name == "Edit" or .name == "MultiEdit") |
+  .input.file_path // .input.path // empty
 ' "$TRANSCRIPT_PATH" 2>/dev/null | sort -u | head -50)
 
 # Last ~80 conversation exchanges (user + assistant messages)
@@ -72,9 +69,12 @@ RECENT_EXCHANGES=$(jq -r '
 ' "$TRANSCRIPT_PATH" 2>/dev/null | tail -160)
 
 # Build handoff document
-cat > "$HANDOFF_FILE" << HANDOFF_EOF
+cat > "$HANDOFF_FILE" << 'REMEMBRALL_HANDOFF_END'
 # Session Handoff
 
+REMEMBRALL_HANDOFF_END
+
+cat >> "$HANDOFF_FILE" << REMEMBRALL_HANDOFF_META
 **Created:** $(date -u +%Y-%m-%dT%H:%M:%SZ)
 **Session ID:** $SESSION_ID
 **Project:** $CWD
@@ -101,7 +101,7 @@ $FILE_PATHS
 \`\`\`
 $RECENT_EXCHANGES
 \`\`\`
-HANDOFF_EOF
+REMEMBRALL_HANDOFF_META
 
 # Clean up stale handoffs (older than 24h) for this project
 find "$HANDOFF_DIR" -name "handoff-*.md" -mmin +1440 -delete 2>/dev/null || true

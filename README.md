@@ -6,6 +6,8 @@ Remembrall monitors your context window in real-time, warns you at 30% remaining
 
 ## How It Works
 
+> **Note:** The context monitor requires a one-time bridge setup. Run `/setup-remembrall` after installing the plugin (see [Installation](#installation) below). The safety net and auto-resume layers work without any setup.
+
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                        Claude Code Session                       │
@@ -47,7 +49,7 @@ Remembrall monitors your context window in real-time, warns you at 30% remaining
 
 1. **Early Warning** (`context-monitor.sh`) — Reads context % from a bridge file. Nudges Claude at 30% remaining ("run /handoff") and 20% remaining ("STOP everything, /handoff NOW").
 
-2. **Safety Net** (`precompact-handoff.sh`) — If the early warning is missed and Claude auto-compacts, this hook extracts files touched and recent conversation from the transcript into a handoff document.
+2. **Safety net** (`precompact-handoff.sh`) — If the early warning is missed and Claude auto-compacts, this hook extracts files touched and recent conversation from the transcript into a handoff document. Will not overwrite a higher-quality skill-generated handoff.
 
 3. **Auto-Resume** (`session-resume.sh`) — On session start after compaction or `/clear`, injects the handoff content directly into Claude's context so it picks up where it left off.
 
@@ -89,9 +91,15 @@ Run `/remembrall-status` to check everything is working.
 ## Requirements
 
 - Claude Code with plugin support
-- `jq` (used by hooks to parse JSON input)
-- `bc` (used for numeric comparisons)
-- `md5` (macOS) or `md5sum` (Linux) for project hashing
+- `jq` — required; hooks exit gracefully if missing but will not function
+- `bc` — required for the context monitor; without it, the early warning layer is disabled (safety net and auto-resume still work)
+- `md5` (macOS) or `md5sum` (Linux) — required for project hashing
+
+After cloning, ensure hook scripts are executable:
+
+```bash
+chmod +x hooks/*.sh scripts/*.sh
+```
 
 ## Commands
 

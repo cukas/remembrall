@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 # Shared helpers for remembrall hooks
 
+# Require jq — exit gracefully if not available
+remembrall_require_jq() {
+  if ! command -v jq >/dev/null 2>&1; then
+    echo "remembrall: jq not found — hook disabled" >&2
+    exit 0
+  fi
+}
+
 # Cross-platform md5 hash
 remembrall_md5() {
   if command -v md5 >/dev/null 2>&1; then
@@ -29,4 +37,32 @@ remembrall_find_bridge() {
     dir=$(dirname "$dir")
   done
   return 1
+}
+
+# Compute handoff directory for a given CWD
+remembrall_handoff_dir() {
+  local cwd="$1"
+  local hash
+  hash=$(remembrall_md5 "$cwd") || return 1
+  echo "$HOME/.remembrall/handoffs/$hash"
+}
+
+# Cross-platform file age in seconds
+remembrall_file_age() {
+  local file="$1"
+  if [ "$(uname)" = "Darwin" ]; then
+    echo $(( $(date +%s) - $(stat -f %m "$file") ))
+  else
+    echo $(( $(date +%s) - $(stat -c %Y "$file") ))
+  fi
+}
+
+# JSON-safe string escaping using jq (RFC 8259 compliant)
+remembrall_escape_json() {
+  printf '%s' "$1" | jq -Rs . | sed 's/^"//;s/"$//'
+}
+
+# Validate that a value is a number (integer or decimal)
+remembrall_validate_number() {
+  [[ "$1" =~ ^[0-9]+(\.[0-9]+)?$ ]]
 }

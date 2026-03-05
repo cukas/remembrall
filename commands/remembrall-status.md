@@ -12,3 +12,5 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/remembrall-status.sh"
 ```
 
 If anything shows NOT FOUND or MISSING, suggest the user run `/setup-remembrall`.
+
+If the script fails to run (e.g., permission denied or command not found), check that the plugin is correctly installed and that the hook scripts are executable (`chmod +x hooks/*.sh scripts/*.sh` from the plugin root).

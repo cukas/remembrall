@@ -3,8 +3,7 @@
   "description": "Automatic context handoff system for Claude Code — monitors context window %, auto-triggers handoffs at 30% remaining, supports multi-session handoff files, and auto-resumes on compaction/clear",
   "version": "1.0.0",
   "author": {
-    "name": "cukas",
-    "email": "noreply@github.com"
+    "name": "cukas"
   },
   "homepage": "https://github.com/cukas/remembrall",
   "repository": "https://github.com/cukas/remembrall",

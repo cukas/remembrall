@@ -5,6 +5,8 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"
 
+remembrall_require_jq
+
 INPUT=$(cat)
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // "default"')
 CWD=$(echo "$INPUT" | jq -r '.cwd // empty')
@@ -18,7 +20,7 @@ fi
 CTX_FILE=$(remembrall_find_bridge "$CWD") || exit 0
 
 REMAINING=$(cat "$CTX_FILE" 2>/dev/null)
-if [ -z "$REMAINING" ]; then
+if [ -z "$REMAINING" ] || ! remembrall_validate_number "$REMAINING"; then
   exit 0
 fi
 
@@ -43,11 +45,10 @@ if (( $(echo "$REMAINING > 30" | bc -l 2>/dev/null || echo 0) )); then
   exit 0
 fi
 
-# Handoff directory uses the hook's own CWD hash (not the bridge's)
-CWD_HASH=$(remembrall_md5 "$CWD") || exit 0
-HANDOFF_DIR="$HOME/.remembrall/handoffs/$CWD_HASH"
+# Handoff directory
+HANDOFF_DIR=$(remembrall_handoff_dir "$CWD") || exit 0
 
-# <=20% — URGENT
+# <=20% — URGENT (only suppress if urgent already sent; allows escalation from warning)
 if (( $(echo "$REMAINING <= 20" | bc -l 2>/dev/null || echo 0) )); then
   if [ "$LAST_NUDGE" = "urgent" ]; then
     exit 0
@@ -61,8 +62,8 @@ EOF
   exit 0
 fi
 
-# <=30% — warning
-if [ "$LAST_NUDGE" = "warning" ] || [ "$LAST_NUDGE" = "urgent" ]; then
+# <=30% — WARNING (only suppress if warning already sent)
+if [ "$LAST_NUDGE" = "warning" ]; then
   exit 0
 fi
 echo "warning" > "$NUDGE_FILE"

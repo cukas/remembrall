@@ -15,7 +15,7 @@ Your status line already has access to `$remaining` (context window % remaining)
 
 1. **Check if the bridge already exists** — Run:
    ```bash
-   grep -q "claude-context-pct" ~/.claude/settings.json && echo "Bridge already installed" || echo "Bridge not found"
+   grep -q "claude-context-pct" ~/.claude/settings.json 2>/dev/null && echo "Bridge already installed" || echo "Bridge not found"
    ```
 
 2. **If already installed:** Tell the user "Remembrall bridge is already set up. You're good to go!" and stop.

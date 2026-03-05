@@ -1,10 +1,9 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "remembrall",
-  "description": "Context handoff plugins for Claude Code",
+  "description": "Automatic context handoff system for Claude Code — monitors context window %, auto-triggers handoffs at 30% remaining, and auto-resumes on compaction or /clear",
   "owner": {
-    "name": "cukas",
-    "email": "noreply@github.com"
+    "name": "cukas"
   },
   "plugins": [
     {
@@ -12,8 +11,7 @@
       "description": "Automatic context handoff — monitors context window %, auto-triggers handoffs at 30% remaining, auto-resumes on compaction/clear",
       "version": "1.0.0",
       "author": {
-        "name": "cukas",
-        "email": "noreply@github.com"
+        "name": "cukas"
       },
       "source": "./",
       "category": "productivity",

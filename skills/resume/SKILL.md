@@ -47,7 +47,7 @@ Handoffs are stored per-project using a hash of the working directory:
 
    Your own context monitor counter starts at 0 automatically (new session = new session ID). Do NOT touch other sessions' nudge files in `/tmp/remembrall-nudges/`.
 
-5. **Validate freshness** — Check the timestamp in the handoff. If older than 48 hours, warn the user it may be stale and ask if they still want to resume.
+5. **Validate freshness** — Check the timestamp in the handoff. If older than 24 hours, warn the user it may be stale and ask if they still want to resume. (Note: the auto-resume hook deletes handoffs older than 24h, so this mainly applies to manually invoked `/resume`.)
 
 6. **Orient yourself** — Read the key files mentioned in the handoff to verify the current state matches what was described. Things may have changed since the handoff was written (e.g., the user made manual edits).
 

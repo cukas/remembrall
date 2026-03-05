@@ -25,7 +25,7 @@ To compute the hash cross-platform:
 
 ## Steps
 
-1. **Determine session ID** — Your session ID is available from the context monitor nudge files. Check `/tmp/remembrall-nudges/` for your session's file. If unsure, use a timestamp-based fallback: `handoff-$(date +%s).md`.
+1. **Determine session ID** — Run `echo $CLAUDE_SESSION_ID` to get your session ID. If that is not set, check `/tmp/remembrall-nudges/` for your session's nudge file. As a last resort, use a timestamp fallback: `handoff-$(date +%s).md` — the auto-resume hook will still find it via most-recent-file lookup.
 
 2. **Compute handoff directory** — Run this to get the correct path:
    ```bash
@@ -41,8 +41,9 @@ To compute the hash cross-platform:
 
 3. **Clean up nudge state** — Reset your context monitor so it doesn't keep firing:
    ```bash
-   # Find and remove YOUR nudge file (matches your session ID)
-   rm -f /tmp/remembrall-nudges/$SESSION_ID
+   # Use the session ID you determined in step 1
+   SESSION_ID="<your session ID from step 1>"
+   rm -f "/tmp/remembrall-nudges/$SESSION_ID"
    ```
    Do NOT wipe all nudge files (`rm *`) — other Claude instances have their own.
 
