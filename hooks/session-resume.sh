@@ -12,13 +12,23 @@ SOURCE=$(echo "$INPUT" | jq -r '.source // empty')
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty')
 CWD=$(echo "$INPUT" | jq -r '.cwd // empty')
 
-# Only inject on compaction resume or clear (not fresh startup)
-if [ "$SOURCE" != "compact" ] && [ "$SOURCE" != "clear" ]; then
+# Exit if CWD not available
+if [ -z "$CWD" ]; then
   exit 0
 fi
 
-# Exit if CWD not available
-if [ -z "$CWD" ]; then
+# For fresh session starts (not compact/clear): check bridge and nudge if missing
+if [ "$SOURCE" != "compact" ] && [ "$SOURCE" != "clear" ]; then
+  if ! remembrall_find_bridge "$CWD" >/dev/null 2>&1; then
+    cat <<EOF
+{
+  "hookSpecificOutput": {
+    "hookEventName": "SessionStart",
+    "additionalContext": "Remembrall: The context-monitor bridge is not set up. Run /setup-remembrall to enable real-time context tracking. Without it, Remembrall falls back to transcript-size estimation (less accurate). The safety net and auto-resume layers still work."
+  }
+}
+EOF
+  fi
   exit 0
 fi
 

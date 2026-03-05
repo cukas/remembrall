@@ -25,12 +25,23 @@
     ],
     "SessionStart": [
       {
-        "matcher": "compact|clear",
+        "matcher": "*",
         "hooks": [
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/session-resume.sh",
             "async": false
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop-check.sh",
+            "timeout": 5
           }
         ]
       }

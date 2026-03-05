@@ -68,3 +68,28 @@ remembrall_escape_json() {
 remembrall_validate_number() {
   [[ "$1" =~ ^[0-9]+(\.[0-9]+)?$ ]]
 }
+
+# Estimate context remaining from transcript file size.
+# Used as a fallback when the status-line bridge is not configured.
+# Returns estimated remaining % on stdout, or exits 1 if no estimate possible.
+# Thresholds are conservative — better to warn too early than too late.
+remembrall_estimate_context() {
+  local transcript_path="$1"
+  if [ -z "$transcript_path" ] || [ ! -f "$transcript_path" ]; then
+    return 1
+  fi
+
+  local size
+  size=$(wc -c < "$transcript_path" 2>/dev/null) || return 1
+  size=$(echo "$size" | tr -d ' ')
+
+  if [ "$size" -gt 204800 ]; then
+    echo "20"  # >200KB — likely ~20% remaining
+  elif [ "$size" -gt 153600 ]; then
+    echo "30"  # >150KB — likely ~30% remaining
+  elif [ "$size" -gt 102400 ]; then
+    echo "50"  # >100KB — likely ~50% remaining
+  else
+    return 1   # Too small to estimate reliably
+  fi
+}

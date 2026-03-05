@@ -6,7 +6,7 @@ Remembrall monitors your context window in real-time, warns you at 30% remaining
 
 ## How It Works
 
-> **Note:** The context monitor requires a one-time bridge setup. Run `/setup-remembrall` after installing the plugin (see [Installation](#installation) below). The safety net and auto-resume layers work without any setup.
+> **Note:** For best accuracy, run `/setup-remembrall` to set up the status-line bridge. Without it, the context monitor falls back to transcript-size estimation (less accurate but still functional). The safety net and auto-resume layers work without any setup.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -17,6 +17,11 @@ Remembrall monitors your context window in real-time, warns you at 30% remaining
 │       │                   context-monitor.sh                     │
 │       │                   (UserPromptSubmit)                     │
 │       │                          │                               │
+│       │              bridge found? ──┐── no?                     │
+│       │                  │           │    │                      │
+│       │              use bridge   estimate from                  │
+│       │                  │        transcript size                │
+│       │                  ▼           ▼                           │
 │       │                 <=30%? ──┤── <=20%?                      │
 │       │                  │       │      │                        │
 │       │              "warning"   │   "urgent"                    │
@@ -25,11 +30,17 @@ Remembrall monitors your context window in real-time, warns you at 30% remaining
 │       │                  ▼       │      ▼                        │
 │       │            Auto /handoff │  STOP + /handoff              │
 │       │                          │                               │
+│  ─── task complete ──────────────┤                               │
+│       │                          │                               │
+│  stop-check.sh (Stop hook)       │                               │
+│  (suggests /clear if <40%)       │                               │
+│       │                          │                               │
 │  ─── compaction ─────────────────┤                               │
 │       │                          │                               │
 │  precompact-handoff.sh           │                               │
 │  (safety net — auto-generates    │                               │
-│   handoff from transcript)       │                               │
+│   handoff with errors, git ops,  │                               │
+│   tasks, files, conversation)    │                               │
 │       │                          │                               │
 │       ▼                          │                               │
 │  ~/.remembrall/handoffs/{hash}/handoff-{session}.md              │
@@ -45,13 +56,15 @@ Remembrall monitors your context window in real-time, warns you at 30% remaining
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-## Three Layers of Protection
+## Four Layers of Protection
 
-1. **Early Warning** (`context-monitor.sh`) — Reads context % from a bridge file. Nudges Claude at 30% remaining ("run /handoff") and 20% remaining ("STOP everything, /handoff NOW").
+1. **Early Warning** (`context-monitor.sh`) — Reads context % from a bridge file, or estimates it from transcript size as a fallback. Nudges Claude at 30% remaining ("run /handoff") and 20% remaining ("STOP everything, /handoff NOW").
 
-2. **Safety net** (`precompact-handoff.sh`) — If the early warning is missed and Claude auto-compacts, this hook extracts files touched and recent conversation from the transcript into a handoff document. Will not overwrite a higher-quality skill-generated handoff.
+2. **Safety net** (`precompact-handoff.sh`) — If the early warning is missed and Claude auto-compacts, this hook extracts files touched, errors encountered, git operations, task state, and recent conversation from the transcript into a handoff document. Will not overwrite a higher-quality skill-generated handoff.
 
-3. **Auto-Resume** (`session-resume.sh`) — On session start after compaction or `/clear`, injects the handoff content directly into Claude's context so it picks up where it left off.
+3. **Auto-Resume** (`session-resume.sh`) — On session start after compaction or `/clear`, injects the handoff content directly into Claude's context so it picks up where it left off. On fresh session starts, checks if the bridge is configured and nudges setup if missing.
+
+4. **Stop Check** (`stop-check.sh`) — When Claude finishes a task, checks if context is below 40% and suggests `/clear` + `/resume` before starting new work.
 
 ## Installation
 
@@ -69,9 +82,9 @@ Add to `~/.claude/settings.json`:
 
 Or install from the plugin marketplace if available.
 
-### 2. Set up the bridge
+### 2. Set up the bridge (optional but recommended)
 
-Run `/setup-remembrall` in Claude Code. This adds a small snippet to your status line that writes context % to a temp file that the hooks can read.
+Run `/setup-remembrall` in Claude Code. This adds a small snippet to your status line that writes context % to a temp file that the hooks can read. Without the bridge, the context monitor falls back to transcript-size estimation (less accurate but still functional). On each fresh session start, Remembrall will remind you once if the bridge is not configured.
 
 The bridge snippet (added inside your existing `if [ -n "$remaining" ]; then ... fi` block):
 

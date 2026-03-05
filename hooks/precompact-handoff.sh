@@ -58,7 +58,35 @@ FILE_PATHS=$(jq -r '
   .input.file_path // .input.path // empty
 ' "$TRANSCRIPT_PATH" 2>/dev/null | sort -u | head -50)
 
-# Last ~80 conversation exchanges (user + assistant messages)
+# Errors encountered — extract tool results containing error/fail/exception patterns
+ERRORS_FOUND=$(jq -r '
+  select(.type == "user") |
+  .content[]? |
+  select(.type == "tool_result") |
+  .content // empty | tostring |
+  select(test("error|Error|fail|FAIL|exception|Exception|panic")) |
+  .[0:300]
+' "$TRANSCRIPT_PATH" 2>/dev/null | tail -10 | sort -u | tail -5)
+
+# Git operations — extract Bash tool calls containing git commands
+GIT_OPS=$(jq -r '
+  select(.type == "assistant" and .content != null) |
+  .content[]? |
+  select(.type == "tool_use" and .name == "Bash") |
+  .input.command // empty |
+  select(startswith("git ") or contains(" git "))
+' "$TRANSCRIPT_PATH" 2>/dev/null | tail -20)
+
+# Task state — extract TaskCreate/TaskUpdate calls
+TASK_STATE=$(jq -r '
+  select(.type == "assistant" and .content != null) |
+  .content[]? |
+  select(.type == "tool_use") |
+  select(.name == "TaskCreate" or .name == "TaskUpdate") |
+  .input | tostring
+' "$TRANSCRIPT_PATH" 2>/dev/null | tail -30)
+
+# Last ~40 conversation exchanges (user + assistant messages)
 RECENT_EXCHANGES=$(jq -r '
   select(.type == "human" or .type == "assistant") |
   if .type == "human" then
@@ -66,7 +94,7 @@ RECENT_EXCHANGES=$(jq -r '
   else
     "ASSISTANT: " + (.content // "[tool use]" | tostring | .[0:500])
   end
-' "$TRANSCRIPT_PATH" 2>/dev/null | tail -160)
+' "$TRANSCRIPT_PATH" 2>/dev/null | tail -80)
 
 # Build handoff document
 cat > "$HANDOFF_FILE" << 'REMEMBRALL_HANDOFF_END'
@@ -74,6 +102,7 @@ cat > "$HANDOFF_FILE" << 'REMEMBRALL_HANDOFF_END'
 
 REMEMBRALL_HANDOFF_END
 
+# Write metadata (safe — these are controlled values)
 cat >> "$HANDOFF_FILE" << REMEMBRALL_HANDOFF_META
 **Created:** $(date -u +%Y-%m-%dT%H:%M:%SZ)
 **Session ID:** $SESSION_ID
@@ -90,18 +119,40 @@ Resume the work described below. Check the task list (/tasks) for pending items.
 
 ---
 
-## Files Touched This Session
-
-\`\`\`
-$FILE_PATHS
-\`\`\`
-
-## Recent Conversation (last ~80 exchanges)
-
-\`\`\`
-$RECENT_EXCHANGES
-\`\`\`
 REMEMBRALL_HANDOFF_META
+
+# Write content sections safely — untrusted content via printf to prevent shell expansion
+{
+  echo '## Files Touched This Session'
+  echo ''
+  echo '```'
+  printf '%s\n' "$FILE_PATHS"
+  echo '```'
+  echo ''
+  echo '## Errors Encountered'
+  echo ''
+  echo '```'
+  printf '%s\n' "$ERRORS_FOUND"
+  echo '```'
+  echo ''
+  echo '## Git Operations'
+  echo ''
+  echo '```'
+  printf '%s\n' "$GIT_OPS"
+  echo '```'
+  echo ''
+  echo '## Task State'
+  echo ''
+  echo '```'
+  printf '%s\n' "$TASK_STATE"
+  echo '```'
+  echo ''
+  echo '## Recent Conversation (last ~40 exchanges)'
+  echo ''
+  echo '```'
+  printf '%s\n' "$RECENT_EXCHANGES"
+  echo '```'
+} >> "$HANDOFF_FILE"
 
 # Clean up stale handoffs (older than 24h) for this project
 find "$HANDOFF_DIR" -name "handoff-*.md" -mmin +1440 -delete 2>/dev/null || true

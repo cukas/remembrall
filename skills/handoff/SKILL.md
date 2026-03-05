@@ -11,43 +11,22 @@ Create a structured handoff document that any Claude instance can read to resume
 
 Each session gets its own handoff file: `handoff-{session_id}.md`. This means multiple Claude sessions can coexist without overwriting each other's handoffs.
 
-## Handoff Directory
-
-Handoffs are stored per-project using a hash of the working directory:
-
-```
-~/.remembrall/handoffs/{md5_of_cwd}/handoff-{session_id}.md
-```
-
-To compute the hash cross-platform:
-- macOS: `md5 -qs "$CWD"`
-- Linux: `printf '%s' "$CWD" | md5sum | cut -d' ' -f1`
-
 ## Steps
 
-1. **Determine session ID** — Run `echo $CLAUDE_SESSION_ID` to get your session ID. If that is not set, check `/tmp/remembrall-nudges/` for your session's nudge file. As a last resort, use a timestamp fallback: `handoff-$(date +%s).md` — the auto-resume hook will still find it via most-recent-file lookup.
-
-2. **Compute handoff directory** — Run this to get the correct path:
+1. **Get handoff path** — Run this single command to compute the correct file path:
    ```bash
-   CWD=$(pwd)
-   if command -v md5 >/dev/null 2>&1; then
-     CWD_HASH=$(md5 -qs "$CWD")
-   elif command -v md5sum >/dev/null 2>&1; then
-     CWD_HASH=$(printf '%s' "$CWD" | md5sum | cut -d' ' -f1)
-   fi
-   HANDOFF_DIR="$HOME/.remembrall/handoffs/$CWD_HASH"
-   mkdir -p "$HANDOFF_DIR"
+   HANDOFF_PATH=$(bash "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/plugins/remembrall}/hooks/handoff-path.sh")
+   echo "$HANDOFF_PATH"
    ```
+   This handles session ID detection, directory creation, and cross-platform hashing automatically.
 
-3. **Clean up nudge state** — Reset your context monitor so it doesn't keep firing:
+2. **Clean up nudge state** — Reset your context monitor so it doesn't keep firing:
    ```bash
-   # Use the session ID you determined in step 1
-   SESSION_ID="<your session ID from step 1>"
-   rm -f "/tmp/remembrall-nudges/$SESSION_ID"
+   rm -f "/tmp/remembrall-nudges/$CLAUDE_SESSION_ID"
    ```
    Do NOT wipe all nudge files (`rm *`) — other Claude instances have their own.
 
-4. **Gather state** — Review the current conversation to understand:
+3. **Gather state** — Review the current conversation to understand:
    - What task was requested
    - What has been completed so far
    - What remains to be done
@@ -57,13 +36,13 @@ To compute the hash cross-platform:
    - Test status (passing/failing)
    - Any task list items (check /tasks)
 
-5. **Write the handoff** — Save to the per-session file. Use this exact structure:
+4. **Write the handoff** — Save to `$HANDOFF_PATH` (from step 1). Use this exact structure:
 
 ```markdown
 # Session Handoff
 
 **Created:** [ISO timestamp]
-**Session ID:** [your session ID]
+**Session ID:** [from step 1]
 **Project:** [working directory path]
 **Task:** [One-line description of what was requested]
 
@@ -89,9 +68,7 @@ To compute the hash cross-platform:
 - [Anything unresolved that needs user input]
 ```
 
-6. **Save location:** Write the handoff to `$HANDOFF_DIR/handoff-{session_id}.md` (the directory computed in step 2).
-
-7. **Confirm to the user** — Tell them the handoff is saved and they can `/clear` or switch to another Claude instance. Show a brief summary of what was captured.
+5. **Confirm to the user** — Tell them the handoff is saved and they can `/clear` or switch to another Claude instance. Show a brief summary of what was captured.
 
 ## Rules
 - Be concise but complete — the next instance has zero context
