@@ -1,6 +1,21 @@
 # Remembrall
 
-A Claude Code plugin that automatically preserves your work when context runs low.
+**Context runs out → work gets lost.** Remembrall fixes that.
+
+```bash
+claude plugin install remembrall@cukas
+```
+
+That's it. No setup needed. Remembrall monitors your context, warns you when it's running low, and auto-saves structured handoffs so your next session picks up exactly where you left off.
+
+```
+🟠 [████░░░░░░] 40%  →  /handoff  →  /clear  →  /replay  →  back to work
+```
+
+---
+
+<details>
+<summary><strong>Full documentation</strong></summary>
 
 Remembrall monitors your context window in real-time, keeps a running session journal, warns you at critical thresholds, creates structured handoff documents with git patches, and offers smart replay with state verification. Team handoffs let another developer's Claude session pick up where yours left off.
 
@@ -296,3 +311,5 @@ Remembrall is fully local. It does not collect, transmit, or store any data outs
 ## License
 
 MIT
+
+</details>
