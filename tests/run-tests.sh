@@ -1,0 +1,544 @@
+#!/usr/bin/env bash
+# Remembrall test runner — zero external dependencies
+# Usage: bash tests/run-tests.sh
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PLUGIN_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+PASS=0
+FAIL=0
+ERRORS=""
+
+# Colors (if terminal supports them)
+RED=""
+GREEN=""
+RESET=""
+if [ -t 1 ]; then
+  RED='\033[0;31m'
+  GREEN='\033[0;32m'
+  RESET='\033[0m'
+fi
+
+assert_eq() {
+  local label="$1" expected="$2" actual="$3"
+  if [ "$expected" = "$actual" ]; then
+    printf "${GREEN}  PASS${RESET} %s\n" "$label"
+    PASS=$((PASS + 1))
+  else
+    printf "${RED}  FAIL${RESET} %s\n    expected: %s\n    actual:   %s\n" "$label" "$expected" "$actual"
+    FAIL=$((FAIL + 1))
+    ERRORS="${ERRORS}\n  - ${label}"
+  fi
+}
+
+assert_match() {
+  local label="$1" pattern="$2" actual="$3"
+  if echo "$actual" | grep -qE "$pattern"; then
+    printf "${GREEN}  PASS${RESET} %s\n" "$label"
+    PASS=$((PASS + 1))
+  else
+    printf "${RED}  FAIL${RESET} %s\n    pattern:  %s\n    actual:   %s\n" "$label" "$pattern" "$actual"
+    FAIL=$((FAIL + 1))
+    ERRORS="${ERRORS}\n  - ${label}"
+  fi
+}
+
+assert_nonzero_exit() {
+  local label="$1"
+  shift
+  if "$@" >/dev/null 2>&1; then
+    printf "${RED}  FAIL${RESET} %s (expected nonzero exit)\n" "$label"
+    FAIL=$((FAIL + 1))
+    ERRORS="${ERRORS}\n  - ${label}"
+  else
+    printf "${GREEN}  PASS${RESET} %s\n" "$label"
+    PASS=$((PASS + 1))
+  fi
+}
+
+# ── Setup temp environment ─────────────────────────────────────────
+TMPDIR_ROOT=$(mktemp -d)
+export HOME="$TMPDIR_ROOT/home"
+mkdir -p "$HOME"
+
+cleanup() {
+  rm -rf "$TMPDIR_ROOT"
+  # Clean up any bridge files we created in the real /tmp
+  rm -f /tmp/claude-context-pct/$(remembrall_md5 "/tmp/test-bridge-project" 2>/dev/null) 2>/dev/null
+  rm -f /tmp/claude-context-pct/$(remembrall_md5 "/tmp/remembrall-test-cwd-$$" 2>/dev/null) 2>/dev/null
+  rm -f /tmp/claude-context-pct/$(remembrall_md5 "/tmp/remembrall-test-stop-$$" 2>/dev/null) 2>/dev/null
+  rm -f /tmp/remembrall-nudges/test-sess 2>/dev/null
+  true
+}
+trap cleanup EXIT
+
+# Source lib.sh
+source "$PLUGIN_ROOT/hooks/lib.sh"
+
+# ═══════════════════════════════════════════════════════════════════
+echo ""
+echo "lib.sh unit tests"
+echo "═════════════════"
+
+# ── remembrall_md5 ────────────────────────────────────────────────
+echo ""
+echo "remembrall_md5:"
+HASH=$(remembrall_md5 "/tmp/test-project")
+assert_match "produces 32-char hex hash" '^[0-9a-f]{32}$' "$HASH"
+
+HASH2=$(remembrall_md5 "/tmp/test-project")
+assert_eq "deterministic for same input" "$HASH" "$HASH2"
+
+HASH3=$(remembrall_md5 "/tmp/other-project")
+if [ "$HASH" != "$HASH3" ]; then
+  printf "${GREEN}  PASS${RESET} different input produces different hash\n"
+  PASS=$((PASS + 1))
+else
+  printf "${RED}  FAIL${RESET} different input produces different hash\n"
+  FAIL=$((FAIL + 1))
+fi
+
+# ── remembrall_validate_number ────────────────────────────────────
+echo ""
+echo "remembrall_validate_number:"
+remembrall_validate_number "42" && assert_eq "integer valid" "0" "0" || assert_eq "integer valid" "0" "1"
+remembrall_validate_number "3.14" && assert_eq "decimal valid" "0" "0" || assert_eq "decimal valid" "0" "1"
+remembrall_validate_number "abc" && assert_eq "string invalid" "1" "0" || assert_eq "string invalid" "0" "0"
+remembrall_validate_number "" && assert_eq "empty invalid" "1" "0" || assert_eq "empty invalid" "0" "0"
+remembrall_validate_number "42abc" && assert_eq "mixed invalid" "1" "0" || assert_eq "mixed invalid" "0" "0"
+
+# ── remembrall_escape_json ────────────────────────────────────────
+echo ""
+echo "remembrall_escape_json:"
+ESCAPED=$(remembrall_escape_json 'hello "world"')
+# The function strips outer quotes from jq output, so \" becomes the escaped form
+assert_match "escapes double quotes" 'hello \\"world\\"' "$ESCAPED"
+
+ESCAPED2=$(remembrall_escape_json $'line1\nline2')
+assert_match "escapes newlines" 'line1\\nline2' "$ESCAPED2"
+
+ESCAPED3=$(remembrall_escape_json "simple")
+assert_eq "simple string unchanged" "simple" "$ESCAPED3"
+
+# ── remembrall_handoff_dir ────────────────────────────────────────
+echo ""
+echo "remembrall_handoff_dir:"
+DIR=$(remembrall_handoff_dir "/tmp/my-project")
+assert_match "under .remembrall/handoffs/" '\.remembrall/handoffs/[0-9a-f]{32}$' "$DIR"
+
+DIR2=$(remembrall_handoff_dir "/tmp/my-project")
+assert_eq "deterministic for same cwd" "$DIR" "$DIR2"
+
+# ── remembrall_patches_dir ────────────────────────────────────────
+echo ""
+echo "remembrall_patches_dir:"
+PDIR=$(remembrall_patches_dir "/tmp/my-project")
+assert_match "under .remembrall/patches/" '\.remembrall/patches/[0-9a-f]{32}$' "$PDIR"
+
+# ── remembrall_config / remembrall_config_set ─────────────────────
+echo ""
+echo "remembrall_config / remembrall_config_set:"
+
+# No config file yet
+VAL=$(remembrall_config "nonexistent" "default_val")
+assert_eq "missing config returns default" "default_val" "$VAL"
+
+# Set a boolean
+remembrall_config_set "git_integration" "true"
+VAL=$(remembrall_config "git_integration" "false")
+assert_eq "boolean true stored and read" "true" "$VAL"
+
+# Verify it's a real JSON boolean, not a string
+RAW=$(jq '.git_integration' "$HOME/.remembrall/config.json")
+assert_eq "stored as JSON boolean (not string)" "true" "$RAW"
+
+# Set a string
+remembrall_config_set "some_string" "hello"
+VAL=$(remembrall_config "some_string" "")
+assert_eq "string value stored and read" "hello" "$VAL"
+
+# Set a number
+remembrall_config_set "retention_hours" "48"
+VAL=$(remembrall_config "retention_hours" "72")
+assert_eq "number stored and read" "48" "$VAL"
+RAW=$(jq '.retention_hours' "$HOME/.remembrall/config.json")
+assert_eq "number stored as JSON number" "48" "$RAW"
+
+# Set false
+remembrall_config_set "git_integration" "false"
+VAL=$(remembrall_config "git_integration" "true")
+assert_eq "boolean false stored and read" "false" "$VAL"
+
+# ── remembrall_retention_hours ────────────────────────────────────
+echo ""
+echo "remembrall_retention_hours:"
+
+# With custom value set above (48)
+remembrall_config_set "retention_hours" "48"
+VAL=$(remembrall_retention_hours)
+assert_eq "custom retention hours" "48" "$VAL"
+
+# Reset to test default
+rm -f "$HOME/.remembrall/config.json"
+VAL=$(remembrall_retention_hours)
+assert_eq "default retention hours" "72" "$VAL"
+
+# ── remembrall_git_enabled / remembrall_team_enabled ──────────────
+echo ""
+echo "remembrall_git_enabled / remembrall_team_enabled:"
+
+# No config = disabled
+rm -f "$HOME/.remembrall/config.json"
+remembrall_git_enabled "/tmp" && R=true || R=false
+assert_eq "git disabled by default" "false" "$R"
+
+remembrall_team_enabled && R=true || R=false
+assert_eq "team disabled by default" "false" "$R"
+
+# Enable team
+remembrall_config_set "team_handoffs" "true"
+remembrall_team_enabled && R=true || R=false
+assert_eq "team enabled after config set" "true" "$R"
+
+# ── remembrall_estimate_context ───────────────────────────────────
+echo ""
+echo "remembrall_estimate_context:"
+
+# No file
+R=$(remembrall_estimate_context "" 2>/dev/null) && STATUS=0 || STATUS=1
+assert_eq "empty path returns error" "1" "$STATUS"
+
+# Small file (< 40% of 256KB) — should return error (too small)
+SMALL_FILE="$TMPDIR_ROOT/small_transcript.jsonl"
+dd if=/dev/zero bs=1024 count=50 of="$SMALL_FILE" 2>/dev/null
+R=$(remembrall_estimate_context "$SMALL_FILE") && STATUS=0 || STATUS=1
+assert_eq "small transcript returns error" "1" "$STATUS"
+
+# Medium file (~60% of 256KB = ~153KB)
+MED_FILE="$TMPDIR_ROOT/med_transcript.jsonl"
+dd if=/dev/zero bs=1024 count=153 of="$MED_FILE" 2>/dev/null
+R=$(remembrall_estimate_context "$MED_FILE")
+assert_match "medium transcript returns 30-50%" '^(3[0-9]|4[0-9]|50)$' "$R"
+
+# Large file (~80% of 256KB = ~204KB)
+LARGE_FILE="$TMPDIR_ROOT/large_transcript.jsonl"
+dd if=/dev/zero bs=1024 count=204 of="$LARGE_FILE" 2>/dev/null
+R=$(remembrall_estimate_context "$LARGE_FILE")
+assert_match "large transcript returns 10-25%" '^(5|[12][0-9])$' "$R"
+
+# Custom max_transcript_kb
+remembrall_config_set "max_transcript_kb" "512"
+R=$(remembrall_estimate_context "$LARGE_FILE") && STATUS=0 || STATUS=1
+assert_eq "with larger window, 200KB is too small to estimate" "1" "$STATUS"
+rm -f "$HOME/.remembrall/config.json"
+
+# ── remembrall_file_age ───────────────────────────────────────────
+echo ""
+echo "remembrall_file_age:"
+FRESH_FILE="$TMPDIR_ROOT/fresh_file"
+touch "$FRESH_FILE"
+AGE=$(remembrall_file_age "$FRESH_FILE")
+assert_match "fresh file age is 0-2 seconds" '^[012]$' "$AGE"
+
+# ── remembrall_find_bridge ────────────────────────────────────────
+echo ""
+echo "remembrall_find_bridge:"
+
+# No bridge file
+R=$(remembrall_find_bridge "/tmp/nonexistent-project" 2>/dev/null) && STATUS=0 || STATUS=1
+assert_eq "no bridge returns error" "1" "$STATUS"
+
+# Create a bridge file
+CTX_DIR="/tmp/claude-context-pct"
+mkdir -p "$CTX_DIR"
+HASH=$(remembrall_md5 "/tmp/test-bridge-project")
+echo "42" > "$CTX_DIR/$HASH"
+R=$(remembrall_find_bridge "/tmp/test-bridge-project")
+assert_eq "finds bridge for exact cwd" "$CTX_DIR/$HASH" "$R"
+
+# Test parent directory walk
+R=$(remembrall_find_bridge "/tmp/test-bridge-project/src/deep/path")
+# Should NOT find it (parent is /tmp/test-bridge-project but hash is for exact path)
+# Actually the walk checks /tmp/test-bridge-project/src/deep/path, then /tmp/test-bridge-project/src/deep, etc.
+# It should find /tmp/test-bridge-project if it walks far enough
+assert_eq "finds bridge via parent walk" "$CTX_DIR/$HASH" "$R"
+
+# Cleanup bridge
+rm -f "$CTX_DIR/$HASH"
+
+# ── remembrall_frontmatter_get ────────────────────────────────────
+echo ""
+echo "remembrall_frontmatter_get:"
+
+FM_FILE="$TMPDIR_ROOT/test_handoff.md"
+cat > "$FM_FILE" << 'FMEOF'
+---
+created: 2026-03-05T14:30:00Z
+session_id: abc123
+branch: main
+commit: deadbeef
+patch: /tmp/patch.diff
+team: true
+---
+
+# Session Handoff
+Content here.
+FMEOF
+
+assert_eq "extracts created" "2026-03-05T14:30:00Z" "$(remembrall_frontmatter_get "$FM_FILE" "created")"
+assert_eq "extracts session_id" "abc123" "$(remembrall_frontmatter_get "$FM_FILE" "session_id")"
+assert_eq "extracts branch" "main" "$(remembrall_frontmatter_get "$FM_FILE" "branch")"
+assert_eq "extracts commit" "deadbeef" "$(remembrall_frontmatter_get "$FM_FILE" "commit")"
+assert_eq "extracts patch" "/tmp/patch.diff" "$(remembrall_frontmatter_get "$FM_FILE" "patch")"
+assert_eq "missing key returns empty" "" "$(remembrall_frontmatter_get "$FM_FILE" "nonexistent")"
+
+# ── remembrall_team_handoff_dir ───────────────────────────────────
+echo ""
+echo "remembrall_team_handoff_dir:"
+TDIR=$(remembrall_team_handoff_dir "/tmp/my-project")
+assert_eq "team dir is project-local" "/tmp/my-project/.remembrall/handoffs" "$TDIR"
+
+
+# ═══════════════════════════════════════════════════════════════════
+echo ""
+echo "Hook integration tests"
+echo "══════════════════════"
+
+# ── context-monitor.sh ────────────────────────────────────────────
+echo ""
+echo "context-monitor.sh:"
+
+# Create a bridge file with high context remaining
+CTX_DIR="/tmp/claude-context-pct"
+mkdir -p "$CTX_DIR"
+TEST_CWD="/tmp/remembrall-test-cwd-$$"
+mkdir -p "$TEST_CWD"
+HASH=$(remembrall_md5 "$TEST_CWD")
+
+# High context (85%) — should produce no output
+echo "85" > "$CTX_DIR/$HASH"
+OUTPUT=$(echo '{"session_id":"test-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
+assert_eq "85% remaining: silent" "" "$OUTPUT"
+
+# 50% — journal checkpoint
+echo "50" > "$CTX_DIR/$HASH"
+rm -f "/tmp/remembrall-nudges/test-sess"
+OUTPUT=$(echo '{"session_id":"test-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
+assert_match "50% triggers checkpoint nudge" "Context checkpoint" "$OUTPUT"
+
+# 50% again — should be suppressed (already nudged)
+OUTPUT=$(echo '{"session_id":"test-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
+assert_eq "50% second time: suppressed" "" "$OUTPUT"
+
+# 25% — warning
+echo "25" > "$CTX_DIR/$HASH"
+OUTPUT=$(echo '{"session_id":"test-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
+assert_match "25% triggers warning" "Context getting low" "$OUTPUT"
+
+# 15% — urgent
+echo "15" > "$CTX_DIR/$HASH"
+OUTPUT=$(echo '{"session_id":"test-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
+assert_match "15% triggers urgent" "Context critically low" "$OUTPUT"
+
+# 15% again — suppressed
+OUTPUT=$(echo '{"session_id":"test-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
+assert_eq "15% second time: suppressed" "" "$OUTPUT"
+
+# 90% — reset (post-compaction)
+echo "90" > "$CTX_DIR/$HASH"
+OUTPUT=$(echo '{"session_id":"test-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
+assert_eq "90% post-compaction: silent + reset" "" "$OUTPUT"
+[ ! -f "/tmp/remembrall-nudges/test-sess" ] && R="cleaned" || R="exists"
+assert_eq "nudge file cleaned after reset" "cleaned" "$R"
+
+# Cleanup
+rm -f "$CTX_DIR/$HASH"
+rm -rf "$TEST_CWD"
+rm -f "/tmp/remembrall-nudges/test-sess"
+
+# ── session-resume.sh ─────────────────────────────────────────────
+echo ""
+echo "session-resume.sh:"
+
+# Fresh start without bridge — should nudge setup
+TEST_CWD="/tmp/remembrall-test-resume-$$"
+mkdir -p "$TEST_CWD"
+OUTPUT=$(echo '{"source":"fresh","session_id":"test-resume","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/session-resume.sh" 2>/dev/null)
+assert_match "fresh start without bridge: nudges setup" "setup-remembrall" "$OUTPUT"
+
+# Compact resume with handoff file
+HASH=$(remembrall_md5 "$TEST_CWD")
+HANDOFF_DIR="$HOME/.remembrall/handoffs/$HASH"
+mkdir -p "$HANDOFF_DIR"
+cat > "$HANDOFF_DIR/handoff-test-resume.md" << 'HEOF'
+---
+created: 2026-03-05T14:30:00Z
+session_id: test-resume
+project: /tmp/test
+status: in_progress
+branch: main
+commit: abc1234
+patch:
+---
+
+# Session Handoff
+**Task:** Fix the widget
+HEOF
+
+OUTPUT=$(echo '{"source":"compact","session_id":"test-resume","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/session-resume.sh" 2>/dev/null)
+assert_match "compact resume: injects handoff" "SESSION HANDOFF LOADED" "$OUTPUT"
+assert_match "compact resume: contains task" "Fix the widget" "$OUTPUT"
+
+# Handoff file should be consumed (deleted)
+[ ! -f "$HANDOFF_DIR/handoff-test-resume.md" ] && R="consumed" || R="exists"
+assert_eq "handoff file consumed after resume" "consumed" "$R"
+
+# Cleanup
+rm -rf "$TEST_CWD" "$HANDOFF_DIR"
+
+# ── stop-check.sh ─────────────────────────────────────────────────
+echo ""
+echo "stop-check.sh:"
+
+TEST_CWD="/tmp/remembrall-test-stop-$$"
+mkdir -p "$TEST_CWD"
+HASH=$(remembrall_md5 "$TEST_CWD")
+CTX_DIR="/tmp/claude-context-pct"
+
+# High context — no suggestion
+echo "60" > "$CTX_DIR/$HASH"
+OUTPUT=$(echo '{"cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/stop-check.sh" 2>&1)
+assert_eq "60% remaining: no suggestion" "" "$OUTPUT"
+
+# Low context — suggest clear
+echo "30" > "$CTX_DIR/$HASH"
+OUTPUT=$(echo '{"cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/stop-check.sh" 2>&1)
+assert_match "30% remaining: suggests /clear" "/clear" "$OUTPUT"
+
+# Cleanup
+rm -f "$CTX_DIR/$HASH"
+rm -rf "$TEST_CWD"
+
+# ── handoff-path.sh ──────────────────────────────────────────────
+echo ""
+echo "handoff-path.sh:"
+
+TEST_CWD="/tmp/remembrall-test-path-$$"
+mkdir -p "$TEST_CWD"
+export CLAUDE_SESSION_ID="test-path-sess"
+
+OUTPUT=$(bash "$PLUGIN_ROOT/hooks/handoff-path.sh" "$TEST_CWD" 2>/dev/null)
+assert_match "outputs valid handoff path" 'handoff-test-path-sess\.md$' "$OUTPUT"
+assert_match "path under .remembrall/handoffs/" '\.remembrall/handoffs/[0-9a-f]' "$OUTPUT"
+
+# Without session ID — uses timestamp fallback
+unset CLAUDE_SESSION_ID
+OUTPUT=$(bash "$PLUGIN_ROOT/hooks/handoff-path.sh" "$TEST_CWD" 2>/dev/null)
+assert_match "fallback uses timestamp" 'handoff-[0-9]+\.md$' "$OUTPUT"
+
+rm -rf "$TEST_CWD"
+
+
+# ═══════════════════════════════════════════════════════════════════
+echo ""
+echo "Edge case tests"
+echo "════════════════"
+
+echo ""
+echo "Missing dependencies:"
+
+# context-monitor without bc
+OUTPUT=$(PATH="/usr/bin" echo '{"session_id":"x","cwd":"/tmp"}' | bash -c 'export PATH="/usr/bin:/bin"; source "'"$PLUGIN_ROOT"'/hooks/lib.sh"; exec bash "'"$PLUGIN_ROOT"'/hooks/context-monitor.sh"' 2>&1) || true
+# The script should exit 0 gracefully — just checking it doesn't crash
+
+echo ""
+echo "Handoff chains (remembrall_previous_session):"
+TEST_CWD="/tmp/remembrall-test-chain-$$"
+mkdir -p "$TEST_CWD"
+HASH=$(remembrall_md5 "$TEST_CWD")
+CHAIN_DIR="$HOME/.remembrall/handoffs/$HASH"
+mkdir -p "$CHAIN_DIR"
+
+# No previous handoffs
+R=$(remembrall_previous_session "$TEST_CWD" "sess-1" 2>/dev/null) && STATUS=0 || STATUS=1
+assert_eq "no previous session when dir empty" "" "$R"
+
+# One previous handoff
+cat > "$CHAIN_DIR/handoff-sess-old.md" << 'EOF'
+---
+session_id: sess-old
+---
+# Old handoff
+EOF
+
+R=$(remembrall_previous_session "$TEST_CWD" "sess-new")
+assert_eq "finds previous session" "sess-old" "$R"
+
+# Should not return own session
+R=$(remembrall_previous_session "$TEST_CWD" "sess-old")
+assert_eq "skips own session" "" "$R"
+
+# Multiple previous — returns most recent (backdate old file to ensure ordering)
+touch -t 202501010000 "$CHAIN_DIR/handoff-sess-old.md"
+cat > "$CHAIN_DIR/handoff-sess-newer.md" << 'EOF'
+---
+session_id: sess-newer
+---
+# Newer handoff
+EOF
+
+R=$(remembrall_previous_session "$TEST_CWD" "sess-current")
+assert_eq "returns most recent previous" "sess-newer" "$R"
+
+rm -rf "$TEST_CWD" "$CHAIN_DIR"
+
+echo ""
+echo "Concurrent sessions:"
+TEST_CWD="/tmp/remembrall-test-concurrent-$$"
+mkdir -p "$TEST_CWD"
+HASH=$(remembrall_md5 "$TEST_CWD")
+HANDOFF_DIR="$HOME/.remembrall/handoffs/$HASH"
+mkdir -p "$HANDOFF_DIR"
+
+# Create two handoff files
+cat > "$HANDOFF_DIR/handoff-sess-A.md" << 'EOF'
+---
+session_id: sess-A
+status: in_progress
+---
+# Handoff A
+EOF
+
+cat > "$HANDOFF_DIR/handoff-sess-B.md" << 'EOF'
+---
+session_id: sess-B
+status: in_progress
+---
+# Handoff B
+EOF
+
+# Resume sess-A — should only consume A, leave B
+OUTPUT=$(echo '{"source":"compact","session_id":"sess-A","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/session-resume.sh" 2>/dev/null)
+assert_match "sess-A resume loads A" "Handoff A" "$OUTPUT"
+[ ! -f "$HANDOFF_DIR/handoff-sess-A.md" ] && R="consumed" || R="exists"
+assert_eq "sess-A handoff consumed" "consumed" "$R"
+[ -f "$HANDOFF_DIR/handoff-sess-B.md" ] && R="preserved" || R="gone"
+assert_eq "sess-B handoff preserved" "preserved" "$R"
+
+rm -rf "$TEST_CWD" "$HANDOFF_DIR"
+
+
+# ═══════════════════════════════════════════════════════════════════
+echo ""
+echo "─────────────────"
+printf "Results: ${GREEN}%d passed${RESET}, ${RED}%d failed${RESET}\n" "$PASS" "$FAIL"
+
+if [ "$FAIL" -gt 0 ]; then
+  printf "\nFailed tests:${ERRORS}\n"
+  exit 1
+fi
+
+echo ""
+echo "All tests passed."
+exit 0

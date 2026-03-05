@@ -12,7 +12,9 @@ Remembrall monitors your context window in real-time, keeps a running session jo
 
 - **Team Handoffs** — Share handoffs with your team via a project-local `.remembrall/handoffs/` directory. Another team member's Claude session can pick up where yours left off.
 
-- **Smart Replay** — `/replay` replaces `/resume`. It verifies git state, checks that expected files still exist, warns if HEAD has moved, and offers to restore git patches from the previous session.
+- **Smart Replay** — `/replay` replaces `/resume`. It verifies git state, checks that expected files still exist, warns if HEAD has moved, and offers to restore git patches from the previous session. Remaining tasks are priority-ordered: blockers first, then in-progress, then not-started.
+
+- **Handoff Chains** — Each handoff links to its predecessor via `previous_session`. Across multiple sessions, you get a linked history: session 1 → session 2 → session 3. The replay briefing shows where you are in the chain.
 
 - **Global Config** — One-time setup at `~/.remembrall/config.json` persists settings across all sessions. Configure git integration and team handoffs once, and every Claude session respects them.
 
@@ -78,7 +80,7 @@ Remembrall monitors your context window in real-time, keeps a running session jo
 
 ## Five Layers of Protection
 
-1. **Early Warning** (`context-monitor.sh`) — Reads context % from a bridge file, or estimates it from transcript size as a fallback. Nudges Claude at 30% remaining ("run /handoff") and 20% remaining ("STOP everything, /handoff NOW").
+1. **Early Warning** (`context-monitor.sh`) — Reads context % from a bridge file, or estimates it from transcript size as a fallback. Nudges Claude at 30% remaining ("context getting low, run /handoff") and 20% remaining ("context critically low, run /handoff").
 
 2. **Journal Checkpoint** (`context-monitor.sh` at 60%) — Before things get urgent, Remembrall nudges Claude to update a running journal of progress. This keeps the handoff document incrementally current, so if compaction strikes between 60% and 30%, the handoff already reflects recent work.
 
@@ -129,8 +131,10 @@ Remembrall uses `~/.remembrall/config.json` for persistent settings. Run `/setup
 
 ```json
 {
-  "git_integration": "true",
-  "team_handoffs": "false"
+  "git_integration": true,
+  "team_handoffs": false,
+  "retention_hours": 72,
+  "max_transcript_kb": 256
 }
 ```
 
@@ -138,8 +142,10 @@ Remembrall uses `~/.remembrall/config.json` for persistent settings. Run `/setup
 |---------|---------|-------------|
 | `git_integration` | `false` | Save git patches of session-touched files before handoff |
 | `team_handoffs` | `false` | Copy handoffs to project-local `.remembrall/handoffs/` |
+| `retention_hours` | `72` | Hours to keep handoff files before auto-cleanup |
+| `max_transcript_kb` | `256` | Expected max transcript size in KB (for fallback context estimation) |
 
-Settings apply globally — once configured, all Claude sessions respect them.
+Settings apply globally — once configured, all Claude sessions respect them. Values are stored as native JSON types (booleans, numbers).
 
 ## Git Integration
 
@@ -201,7 +207,7 @@ Handoff files and patches are stored per-project:
 ```
 
 - Each session gets its own file — multiple Claude instances can coexist
-- Handoffs older than 24 hours are auto-cleaned
+- Handoffs older than the configured retention period (default: 72 hours) are auto-cleaned
 - Consumed handoffs are deleted immediately (single-use baton)
 
 ## Example Use Cases

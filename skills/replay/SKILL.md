@@ -36,12 +36,14 @@ The handoff file is a **single-use baton**. Read it, verify state, restore patch
    ```
 
 4. **Parse frontmatter** — If the file starts with `---`, extract structured fields:
-   - `status`, `branch`, `commit`, `patch`, `files`, `tasks`, `team`, `type`
+   - `status`, `branch`, `commit`, `patch`, `files`, `tasks`, `team`, `type`, `previous_session`
    - If no frontmatter (legacy handoff), skip verification steps and proceed with markdown-only mode.
 
-5. **Validate freshness** — Check the `created` timestamp. If older than 24 hours, warn the user it may be stale and ask if they want to continue.
+5. **Check chain history** — If `previous_session` is present, note it for the briefing. Optionally check if the previous session's handoff still exists (it usually won't — consumed on resume). This gives the user awareness of how many sessions deep they are.
 
-6. **Verify git state** (if frontmatter has branch/commit):
+6. **Validate freshness** — Check the `created` timestamp. If older than the configured retention period, warn the user it may be stale and ask if they want to continue.
+
+7. **Verify git state** (if frontmatter has branch/commit):
    ```bash
    CURRENT_BRANCH=$(git branch --show-current 2>/dev/null)
    CURRENT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null)
@@ -55,12 +57,12 @@ The handoff file is a **single-use baton**. Read it, verify state, restore patch
    - **Commit mismatch:** Show what changed since handoff with `git log --oneline`.
    - **Match:** Confirm state is unchanged.
 
-7. **Verify files** — For each file in the frontmatter `files` list:
+8. **Verify files** — For each file in the frontmatter `files` list:
    - Check if it exists on disk
    - If commit is available, check `git diff $COMMIT -- $FILE` to see if modified since handoff
    - Summarize: "N files unchanged, N modified since handoff, N missing"
 
-8. **Restore git patches** (if `patch` field exists and the file is present):
+9. **Restore git patches** (if `patch` field exists and the file is present):
    ```bash
    # Check if patch applies cleanly
    git apply --check "$PATCH_PATH" 2>&1
@@ -70,32 +72,43 @@ The handoff file is a **single-use baton**. Read it, verify state, restore patch
    - **If conflicts:** Show which files conflict, suggest manual review. Do NOT force-apply.
    - **No patch file:** Skip silently.
 
-9. **Present structured briefing** — Show a clear summary to the user:
+10. **Present structured briefing** — Show a clear summary to the user:
 
-   ```
-   ## Session Replay
+    ```
+    ## Session Replay
 
-   **Task:** [from handoff]
-   **Status:** [status] | branch: [match/mismatch] | commit: [match/N new commits]
-   **Files:** [N unchanged, N modified, N missing since handoff]
-   **Patches:** [applied / skipped / none]
+    **Task:** [from handoff]
+    **Status:** [status] | branch: [match/mismatch] | commit: [match/N new commits]
+    **Files:** [N unchanged, N modified, N missing since handoff]
+    **Patches:** [applied / skipped / none]
+    **Chain:** [session N → this session] or [first session] if no previous_session
 
-   ### Completed
-   - [items from handoff]
+    ### Completed
+    - [items from handoff]
 
-   ### Remaining
-   1. [items — these become tasks]
+    ### Remaining (priority-ordered)
+    1. [blockers first — anything marked as blocked, erroring, or prerequisite]
+    2. [in-progress items — partially done work from previous session]
+    3. [not-started items — new tasks that haven't been touched]
 
-   ### Key Decisions (preserved from previous session)
-   - [decisions]
+    ### Key Decisions (preserved from previous session)
+    - [decisions]
 
-   ### Open Questions
-   - [unresolved items]
-   ```
+    ### Open Questions
+    - [unresolved items]
+    ```
 
-10. **Create task list** — For each remaining item from the handoff, create a task so progress is tracked.
+11. **Create task list with priority ordering** — For each remaining item from the handoff, create a task. Order them by priority:
+    1. **Blockers** — items flagged as blocked, failing, or prerequisite for other work
+    2. **In-progress** — items partially completed in the previous session
+    3. **Not-started** — items that haven't been touched yet
 
-11. **Ask to proceed** — "Ready to continue with [next remaining item]?" Don't charge ahead — the user may have changed priorities.
+    Infer priority from context clues in the handoff:
+    - Words like "blocked", "failing", "error", "prerequisite", "depends on", "must fix first" → blocker
+    - Words like "started", "partial", "WIP", "halfway", "begun" → in-progress
+    - Everything else → not-started
+
+12. **Ask to proceed** — "Ready to continue with [next remaining item]?" Don't charge ahead — the user may have changed priorities.
 
 ## Rules
 - Delete only the consumed handoff file — leave other sessions' files alone
@@ -103,7 +116,7 @@ The handoff file is a **single-use baton**. Read it, verify state, restore patch
 - NEVER force-apply patches — if `git apply --check` fails, warn and skip
 - Verify file state before modifying anything
 - Respect decisions documented in the handoff — don't re-debate unless the user asks
-- Legacy handoffs (no YAML frontmatter) still work — just skip verification steps 6-8
+- Legacy handoffs (no YAML frontmatter) still work — just skip verification steps 7-9
 - If the handoff mentions blockers, address those first
 - The handoff may have been written by a different Claude model — don't critique the approach, just continue it
 - If this instance later needs to hand off, use `/handoff` — it will write a fresh one

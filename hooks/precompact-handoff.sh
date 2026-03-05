@@ -48,16 +48,64 @@ if [ -f "$HANDOFF_FILE" ]; then
   fi
 fi
 
-# Extract structured info from JSONL transcript
+# Extract all structured info from JSONL transcript in a SINGLE jq pass.
 # Claude Code transcripts nest tool uses inside content arrays:
 #   {"type":"assistant","content":[{"type":"tool_use","name":"Read","input":{"file_path":"..."}}]}
-FILE_PATHS=$(jq -r '
-  select(.type == "assistant" and .content != null) |
-  .content[]? |
-  select(.type == "tool_use") |
-  select(.name == "Read" or .name == "Write" or .name == "Edit" or .name == "MultiEdit") |
-  .input.file_path // .input.path // empty
-' "$TRANSCRIPT_PATH" 2>/dev/null | sort -u | head -50)
+#
+# Output: 5 sections separated by a NUL-delimited marker line.
+EXTRACTED=$(jq -r '
+  # file paths from Read/Write/Edit/MultiEdit tool uses
+  (
+    select(.type == "assistant" and .content != null) |
+    .content[]? |
+    select(.type == "tool_use") |
+    select(.name == "Read" or .name == "Write" or .name == "Edit" or .name == "MultiEdit") |
+    .input.file_path // .input.path // empty |
+    "FILE:" + .
+  ),
+  # errors from tool results
+  (
+    select(.type == "user") |
+    .content[]? |
+    select(.type == "tool_result") |
+    .content // empty | tostring |
+    select(test("error|Error|fail|FAIL|exception|Exception|panic")) |
+    "ERROR:" + .[0:300]
+  ),
+  # git operations from Bash tool calls
+  (
+    select(.type == "assistant" and .content != null) |
+    .content[]? |
+    select(.type == "tool_use" and .name == "Bash") |
+    .input.command // empty |
+    select(startswith("git ") or contains(" git ")) |
+    "GIT:" + .
+  ),
+  # task state from TaskCreate/TaskUpdate
+  (
+    select(.type == "assistant" and .content != null) |
+    .content[]? |
+    select(.type == "tool_use") |
+    select(.name == "TaskCreate" or .name == "TaskUpdate") |
+    "TASK:" + (.input | tostring)
+  ),
+  # recent conversation exchanges
+  (
+    select(.type == "human" or .type == "assistant") |
+    if .type == "human" then
+      "CONV:USER: " + (.content // "[tool result]" | tostring | .[0:500])
+    else
+      "CONV:ASSISTANT: " + (.content // "[tool use]" | tostring | .[0:500])
+    end
+  )
+' "$TRANSCRIPT_PATH" 2>/dev/null)
+
+# Split extracted data by prefix
+FILE_PATHS=$(echo "$EXTRACTED" | grep '^FILE:' | sed 's/^FILE://' | sort -u | head -50)
+ERRORS_FOUND=$(echo "$EXTRACTED" | grep '^ERROR:' | sed 's/^ERROR://' | tail -10 | sort -u | tail -5)
+GIT_OPS=$(echo "$EXTRACTED" | grep '^GIT:' | sed 's/^GIT://' | tail -20)
+TASK_STATE=$(echo "$EXTRACTED" | grep '^TASK:' | sed 's/^TASK://' | tail -30)
+RECENT_EXCHANGES=$(echo "$EXTRACTED" | grep '^CONV:' | sed 's/^CONV://' | tail -80)
 
 # ─── Git state capture ────────────────────────────────────────────
 BRANCH=""
@@ -71,7 +119,6 @@ if remembrall_git_enabled "$CWD"; then
   DIFF_FILES=()
   while IFS= read -r fp; do
     [ -z "$fp" ] && continue
-    # Only include files that exist or are tracked by git
     if [ -f "$fp" ] || git -C "$CWD" ls-files --error-unmatch "$fp" >/dev/null 2>&1; then
       DIFF_FILES+=("$fp")
     fi
@@ -82,51 +129,11 @@ if remembrall_git_enabled "$CWD"; then
     if [ -n "$PATCHES_DIR" ]; then
       mkdir -p "$PATCHES_DIR"
       PATCH_FILE="$PATCHES_DIR/patch-${SESSION_ID}.diff"
-      # Capture all uncommitted changes (staged + unstaged) for session files only
       git -C "$CWD" diff HEAD -- "${DIFF_FILES[@]}" 2>/dev/null > "$PATCH_FILE"
-      # Remove empty patch files
       [ ! -s "$PATCH_FILE" ] && { rm -f "$PATCH_FILE"; PATCH_FILE=""; }
     fi
   fi
 fi
-
-# Errors encountered — extract tool results containing error/fail/exception patterns
-ERRORS_FOUND=$(jq -r '
-  select(.type == "user") |
-  .content[]? |
-  select(.type == "tool_result") |
-  .content // empty | tostring |
-  select(test("error|Error|fail|FAIL|exception|Exception|panic")) |
-  .[0:300]
-' "$TRANSCRIPT_PATH" 2>/dev/null | tail -10 | sort -u | tail -5)
-
-# Git operations — extract Bash tool calls containing git commands
-GIT_OPS=$(jq -r '
-  select(.type == "assistant" and .content != null) |
-  .content[]? |
-  select(.type == "tool_use" and .name == "Bash") |
-  .input.command // empty |
-  select(startswith("git ") or contains(" git "))
-' "$TRANSCRIPT_PATH" 2>/dev/null | tail -20)
-
-# Task state — extract TaskCreate/TaskUpdate calls
-TASK_STATE=$(jq -r '
-  select(.type == "assistant" and .content != null) |
-  .content[]? |
-  select(.type == "tool_use") |
-  select(.name == "TaskCreate" or .name == "TaskUpdate") |
-  .input | tostring
-' "$TRANSCRIPT_PATH" 2>/dev/null | tail -30)
-
-# Last ~40 conversation exchanges (user + assistant messages)
-RECENT_EXCHANGES=$(jq -r '
-  select(.type == "human" or .type == "assistant") |
-  if .type == "human" then
-    "USER: " + (.content // "[tool result]" | tostring | .[0:500])
-  else
-    "ASSISTANT: " + (.content // "[tool use]" | tostring | .[0:500])
-  end
-' "$TRANSCRIPT_PATH" 2>/dev/null | tail -80)
 
 # Build YAML files list
 FILES_YAML=""
@@ -139,6 +146,9 @@ done <<< "$FILE_PATHS"
 # Determine team mode
 TEAM_MODE=$(remembrall_config "team_handoffs" "false")
 
+# Find previous session for chain linking
+PREV_SESSION=$(remembrall_previous_session "$CWD" "$SESSION_ID" 2>/dev/null || echo "")
+
 # Capture timestamp once for consistency
 NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
@@ -147,6 +157,7 @@ cat > "$HANDOFF_FILE" << REMEMBRALL_FRONTMATTER
 ---
 created: "${NOW}"
 session_id: "${SESSION_ID}"
+previous_session: ${PREV_SESSION:-}
 project: "${CWD}"
 status: interrupted
 type: auto-generated
@@ -216,8 +227,10 @@ if remembrall_team_enabled; then
   cp "$HANDOFF_FILE" "$TEAM_DIR/"
 fi
 
-# Clean up stale handoffs (older than 24h) for this project
-find "$HANDOFF_DIR" -name "handoff-*.md" -mmin +1440 -delete 2>/dev/null || true
+# Clean up stale handoffs based on configurable retention (default: 72h)
+RETENTION_HOURS=$(remembrall_retention_hours)
+RETENTION_MINS=$((RETENTION_HOURS * 60))
+find "$HANDOFF_DIR" -name "handoff-*.md" -mmin +"$RETENTION_MINS" -delete 2>/dev/null || true
 
 # Signal to Claude that handoff was created
 echo "Context is being compacted. Handoff saved to $HANDOFF_FILE — it will be loaded automatically on next session start." >&2

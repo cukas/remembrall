@@ -72,9 +72,11 @@ if [ -z "$HANDOFF_FILE" ] || [ ! -f "$HANDOFF_FILE" ]; then
   exit 0
 fi
 
-# Check age — skip stale handoffs (older than 24h)
+# Check age — skip stale handoffs (older than configured retention)
+RETENTION_HOURS=$(remembrall_retention_hours)
+RETENTION_SECS=$((RETENTION_HOURS * 3600))
 FILE_AGE=$(remembrall_file_age "$HANDOFF_FILE")
-if [ "$FILE_AGE" -gt 86400 ]; then
+if [ "$FILE_AGE" -gt "$RETENTION_SECS" ]; then
   rm -f "$HANDOFF_FILE"
   exit 0
 fi

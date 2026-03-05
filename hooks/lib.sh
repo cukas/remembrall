@@ -72,7 +72,11 @@ remembrall_validate_number() {
 # Estimate context remaining from transcript file size.
 # Used as a fallback when the status-line bridge is not configured.
 # Returns estimated remaining % on stdout, or exits 1 if no estimate possible.
-# Thresholds are conservative — better to warn too early than too late.
+#
+# Uses configurable max_transcript_kb (default: 256) to scale thresholds.
+# The default assumes ~256KB of JSONL transcript ≈ a full context window.
+# Adjust via: remembrall_config_set "max_transcript_kb" "512"
+# Conservative: triggers earlier rather than later.
 remembrall_estimate_context() {
   local transcript_path="$1"
   if [ -z "$transcript_path" ] || [ ! -f "$transcript_path" ]; then
@@ -83,15 +87,31 @@ remembrall_estimate_context() {
   size=$(wc -c < "$transcript_path" 2>/dev/null) || return 1
   size=$(echo "$size" | tr -d ' ')
 
-  if [ "$size" -gt 204800 ]; then
-    echo "20"  # >200KB — likely ~20% remaining
-  elif [ "$size" -gt 153600 ]; then
-    echo "30"  # >150KB — likely ~30% remaining
-  elif [ "$size" -gt 102400 ]; then
-    echo "50"  # >100KB — likely ~50% remaining
-  else
-    return 1   # Too small to estimate reliably
+  local max_kb
+  max_kb=$(remembrall_config "max_transcript_kb" "256")
+  if ! [[ "$max_kb" =~ ^[0-9]+$ ]]; then
+    max_kb=256
   fi
+  local max_bytes=$((max_kb * 1024))
+
+  # Estimate remaining % as inverse of transcript fill ratio
+  # size/max_bytes = used fraction → remaining = 100 - used%
+  if [ "$size" -lt $((max_bytes * 40 / 100)) ]; then
+    return 1  # Too small to estimate reliably (<40% of expected max)
+  fi
+
+  local used_pct=$((size * 100 / max_bytes))
+  if [ "$used_pct" -gt 100 ]; then
+    used_pct=100
+  fi
+  local remaining=$((100 - used_pct))
+
+  # Floor at 5% — never report 0
+  if [ "$remaining" -lt 5 ]; then
+    remaining=5
+  fi
+
+  echo "$remaining"
 }
 
 # ─── Config ────────────────────────────────────────────────────────
@@ -109,7 +129,8 @@ remembrall_config() {
   fi
 
   local value
-  value=$(jq -r --arg k "$key" '.[$k] // empty' "$config_file" 2>/dev/null)
+  # Use raw jq to get the value; .[$k] // empty returns nothing for missing keys
+  value=$(jq -r --arg k "$key" 'if has($k) then .[$k] | tostring else empty end' "$config_file" 2>/dev/null)
 
   if [ -z "$value" ]; then
     echo "$default"
@@ -133,7 +154,15 @@ remembrall_config_set() {
 
   local tmp
   tmp=$(mktemp "${config_file}.XXXXXX")
-  if jq --arg k "$key" --arg v "$value" '.[$k] = $v' "$config_file" > "$tmp" 2>/dev/null; then
+  # Store booleans and numbers as native JSON types, strings as strings
+  local jq_ok=false
+  if [ "$value" = "true" ] || [ "$value" = "false" ] || [[ "$value" =~ ^[0-9]+$ ]]; then
+    jq --arg k "$key" --argjson v "$value" '.[$k] = $v' "$config_file" > "$tmp" 2>/dev/null && jq_ok=true
+  else
+    jq --arg k "$key" --arg v "$value" '.[$k] = $v' "$config_file" > "$tmp" 2>/dev/null && jq_ok=true
+  fi
+
+  if [ "$jq_ok" = true ]; then
     mv "$tmp" "$config_file"
   else
     rm -f "$tmp"
@@ -144,9 +173,12 @@ remembrall_config_set() {
 # ─── Git Integration ──────────────────────────────────────────────
 
 # Check if git integration is enabled AND cwd is a git repo
+# Supports both boolean true and string "true" for backwards compatibility
 remembrall_git_enabled() {
   local cwd="$1"
-  [ "$(remembrall_config "git_integration" "false")" = "true" ] || return 1
+  local val
+  val=$(remembrall_config "git_integration" "false")
+  [ "$val" = "true" ] || return 1
   git -C "$cwd" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 1
 }
 
@@ -161,14 +193,72 @@ remembrall_patches_dir() {
 # ─── Team Handoffs ────────────────────────────────────────────────
 
 # Check if team handoffs are enabled
+# Supports both boolean true and string "true" for backwards compatibility
 remembrall_team_enabled() {
-  [ "$(remembrall_config "team_handoffs" "false")" = "true" ]
+  local val
+  val=$(remembrall_config "team_handoffs" "false")
+  [ "$val" = "true" ]
+}
+
+# Get handoff retention in hours (default: 72)
+remembrall_retention_hours() {
+  local val
+  val=$(remembrall_config "retention_hours" "72")
+  if [[ "$val" =~ ^[0-9]+$ ]]; then
+    echo "$val"
+  else
+    echo "72"
+  fi
 }
 
 # Compute team handoff directory (project-local)
 remembrall_team_handoff_dir() {
   local cwd="$1"
   echo "$cwd/.remembrall/handoffs"
+}
+
+# ─── Handoff Chains ──────────────────────────────────────────────
+
+# Find the most recent handoff session_id for chaining.
+# Returns the session_id from the newest handoff file, or empty if none.
+remembrall_previous_session() {
+  local cwd="$1"
+  local current_session="$2"
+  local handoff_dir
+  handoff_dir=$(remembrall_handoff_dir "$cwd") || return 1
+
+  [ -d "$handoff_dir" ] || return 1
+
+  local newest="" newest_file=""
+  for f in "$handoff_dir"/handoff-*.md; do
+    [ -f "$f" ] || continue
+    # Skip our own session's handoff
+    local basename
+    basename=$(basename "$f" .md)
+    local sid="${basename#handoff-}"
+    [ "$sid" = "$current_session" ] && continue
+    if [ -z "$newest_file" ] || [ "$f" -nt "$newest_file" ]; then
+      newest_file="$f"
+      newest="$sid"
+    fi
+  done
+
+  # Also check claimed files (in-progress resumes)
+  for f in "$handoff_dir"/handoff-*.md.claimed-*; do
+    [ -f "$f" ] || continue
+    local basename
+    basename=$(basename "$f")
+    # Extract session id: handoff-SESSID.md.claimed-PID
+    local sid="${basename#handoff-}"
+    sid="${sid%.md.claimed-*}"
+    [ "$sid" = "$current_session" ] && continue
+    if [ -z "$newest_file" ] || [ "$f" -nt "$newest_file" ]; then
+      newest_file="$f"
+      newest="$sid"
+    fi
+  done
+
+  echo "$newest"
 }
 
 # ─── Frontmatter ──────────────────────────────────────────────────

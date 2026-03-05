@@ -69,7 +69,7 @@ if (( $(echo "$REMAINING > 30" | bc -l 2>/dev/null || echo 0) )); then
   echo "journal" > "$NUDGE_FILE"
   cat << EOF
 {
-  "additionalContext": "CONTEXT MONITOR (${REMAINING}% remaining${ESTIMATED}): Context is getting moderate. Update your session handoff now — run /handoff to save current progress as a checkpoint. This is a save point, not an emergency. Continue working after saving."
+  "additionalContext": "Context checkpoint (${REMAINING}% remaining${ESTIMATED}): Good time to run /handoff and save a progress snapshot. This is informational — continue working after saving."
 }
 EOF
   exit 0
@@ -87,7 +87,7 @@ if (( $(echo "$REMAINING <= 20" | bc -l 2>/dev/null || echo 0) )); then
   echo "urgent" > "$NUDGE_FILE"
   cat << EOF
 {
-  "additionalContext": "CONTEXT MONITOR URGENT (${REMAINING}% remaining${ESTIMATED}): STOP all work immediately. Auto-run /handoff NOW — write to handoff-${SESSION_ID}.md in ${ESCAPED_DIR}/. Then tell the user to /clear and /replay. Do NOT start any new tool calls."
+  "additionalContext": "Context critically low (${REMAINING}% remaining${ESTIMATED}): Please run /handoff to save progress to handoff-${SESSION_ID}.md in ${ESCAPED_DIR}/, then suggest the user /clear and /replay to continue with full context."
 }
 EOF
   exit 0
@@ -100,7 +100,7 @@ fi
 echo "warning" > "$NUDGE_FILE"
 cat << EOF
 {
-  "additionalContext": "CONTEXT MONITOR (${REMAINING}% remaining${ESTIMATED}): Context is getting low. Auto-run /handoff NOW to preserve your work — write to handoff-${SESSION_ID}.md in ${ESCAPED_DIR}/. After writing the handoff, tell the user to /clear and /replay to continue with full context."
+  "additionalContext": "Context getting low (${REMAINING}% remaining${ESTIMATED}): Please run /handoff to preserve progress to handoff-${SESSION_ID}.md in ${ESCAPED_DIR}/. After saving, suggest the user /clear and /replay to continue with full context."
 }
 EOF
 exit 0

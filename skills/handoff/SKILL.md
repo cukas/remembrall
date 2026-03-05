@@ -38,7 +38,14 @@ Each session gets its own handoff file: `handoff-{session_id}.md`. Multiple Clau
    fi
    ```
 
-4. **Gather state** — Review the current conversation to understand:
+4. **Find previous session** (for chain linking) — Check if there's a prior handoff to link to:
+   ```bash
+   source "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/plugins/remembrall}/hooks/lib.sh"
+   PREV_SESSION=$(remembrall_previous_session "$(pwd)" "$CLAUDE_SESSION_ID" 2>/dev/null || echo "")
+   echo "Previous session: ${PREV_SESSION:-none}"
+   ```
+
+5. **Gather state** — Review the current conversation to understand:
    - What task was requested
    - What has been completed so far
    - What remains to be done
@@ -48,7 +55,7 @@ Each session gets its own handoff file: `handoff-{session_id}.md`. Multiple Clau
    - Test status (passing/failing)
    - Any task list items (check /tasks)
 
-5. **Capture git patches** (only if git is enabled) — Save diffs for session-touched files only:
+6. **Capture git patches** (only if git is enabled) — Save diffs for session-touched files only:
    ```bash
    source "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/plugins/remembrall}/hooks/lib.sh"
    CWD=$(pwd)
@@ -69,19 +76,20 @@ Each session gets its own handoff file: `handoff-{session_id}.md`. Multiple Clau
    ```
    **Important:** Only include files YOU modified this session in the git diff command — not the user's other work.
 
-6. **Check team mode** — See if team handoffs are enabled:
+7. **Check team mode** — See if team handoffs are enabled:
    ```bash
    source "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/plugins/remembrall}/hooks/lib.sh"
    TEAM_ENABLED=$(remembrall_team_enabled && echo "true" || echo "false")
    echo "Team handoffs: $TEAM_ENABLED"
    ```
 
-7. **Write the handoff** — Save to `$HANDOFF_PATH` (from step 1). Use this exact structure:
+8. **Write the handoff** — Save to `$HANDOFF_PATH` (from step 1). Use this exact structure:
 
 ```markdown
 ---
 created: [ISO timestamp, e.g. 2026-03-05T14:30:00Z]
 session_id: [from CLAUDE_SESSION_ID or handoff-path output]
+previous_session: [session_id from step 4, or empty if first session]
 project: [working directory path]
 status: [in_progress | blocked | paused]
 branch: [git branch or empty]
@@ -119,7 +127,7 @@ team: [true|false]
 - [Anything unresolved that needs user input]
 ```
 
-8. **Copy to team directory** (if team mode enabled):
+9. **Copy to team directory** (if team mode enabled):
    ```bash
    source "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/plugins/remembrall}/hooks/lib.sh"
    if remembrall_team_enabled; then
@@ -130,10 +138,11 @@ team: [true|false]
    fi
    ```
 
-9. **Confirm to the user** — Tell them the handoff is saved and they can `/clear` or switch to another Claude instance. Show:
-   - Brief summary of what was captured
-   - Whether git patches were saved
-   - Whether team copy was created
+10. **Confirm to the user** — Tell them the handoff is saved and they can `/clear` or switch to another Claude instance. Show:
+    - Brief summary of what was captured
+    - Whether git patches were saved
+    - Whether team copy was created
+    - If this is part of a chain, mention: "This is session N in the chain (previous: {previous_session})"
 
 ## Rules
 - Be concise but complete — the next instance has zero context
