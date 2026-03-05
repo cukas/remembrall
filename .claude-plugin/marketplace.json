@@ -15,7 +15,7 @@
         "name": "cukas",
         "email": "noreply@github.com"
       },
-      "source": ".",
+      "source": "./",
       "category": "productivity",
       "homepage": "https://github.com/cukas/remembrall",
       "tags": ["context", "handoff", "memory", "session", "productivity"]
