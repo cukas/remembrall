@@ -19,3 +19,10 @@ HANDOFF_DIR=$(remembrall_handoff_dir "$CWD") || { echo "Error: could not compute
 mkdir -p "$HANDOFF_DIR"
 
 echo "$HANDOFF_DIR/handoff-${SESSION_ID}.md"
+
+# If team handoffs enabled, also create team directory and report path
+if remembrall_team_enabled; then
+  TEAM_DIR=$(remembrall_team_handoff_dir "$CWD")
+  mkdir -p "$TEAM_DIR"
+  echo "team:$TEAM_DIR/handoff-${SESSION_ID}.md" >&2
+fi

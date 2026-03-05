@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # UserPromptSubmit hook: monitors actual context % via status-line bridge
-# Triggers structured /handoff at 30% remaining, urgent at 20%
+# Triggers journal checkpoint at 60%, warning at 30%, urgent at 20%
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"
@@ -45,13 +45,27 @@ if [ -f "$NUDGE_FILE" ]; then
 fi
 
 # Reset nudge state if context recovered (post-compaction: remaining > 80%)
-if (( $(echo "$REMAINING > 80" | bc -l 2>/dev/null || echo 0) )); then
+if remembrall_gt "$REMAINING" 80; then
   rm -f "$NUDGE_FILE"
   exit 0
 fi
 
-# >30% remaining — do nothing
-if (( $(echo "$REMAINING > 30" | bc -l 2>/dev/null || echo 0) )); then
+# >60% remaining — do nothing
+if remembrall_gt "$REMAINING" 60; then
+  exit 0
+fi
+
+# <=60% and >30% — JOURNAL CHECKPOINT (nudge once to update running handoff)
+if remembrall_gt "$REMAINING" 30; then
+  if [ "$LAST_NUDGE" = "journal" ] || [ "$LAST_NUDGE" = "warning" ] || [ "$LAST_NUDGE" = "urgent" ]; then
+    exit 0
+  fi
+  echo "journal" > "$NUDGE_FILE"
+  cat << EOF
+{
+  "additionalContext": "Context checkpoint (${REMAINING}% remaining${ESTIMATED}): Good time to run /handoff and save a progress snapshot. This is informational — continue working after saving."
+}
+EOF
   exit 0
 fi
 
@@ -60,14 +74,14 @@ HANDOFF_DIR=$(remembrall_handoff_dir "$CWD") || exit 0
 ESCAPED_DIR=$(remembrall_escape_json "$HANDOFF_DIR")
 
 # <=20% — URGENT (only suppress if urgent already sent; allows escalation from warning)
-if (( $(echo "$REMAINING <= 20" | bc -l 2>/dev/null || echo 0) )); then
+if remembrall_le "$REMAINING" 20; then
   if [ "$LAST_NUDGE" = "urgent" ]; then
     exit 0
   fi
   echo "urgent" > "$NUDGE_FILE"
   cat << EOF
 {
-  "additionalContext": "CONTEXT MONITOR URGENT (${REMAINING}% remaining${ESTIMATED}): STOP all work immediately. Auto-run /handoff NOW — write to handoff-${SESSION_ID}.md in ${ESCAPED_DIR}/. Then tell the user to /clear and /resume. Do NOT start any new tool calls."
+  "additionalContext": "Context critically low (${REMAINING}% remaining${ESTIMATED}): Please run /handoff to save progress to handoff-${SESSION_ID}.md in ${ESCAPED_DIR}/, then suggest the user /clear and /replay to continue with full context."
 }
 EOF
   exit 0
@@ -80,7 +94,7 @@ fi
 echo "warning" > "$NUDGE_FILE"
 cat << EOF
 {
-  "additionalContext": "CONTEXT MONITOR (${REMAINING}% remaining${ESTIMATED}): Context is getting low. Auto-run /handoff NOW to preserve your work — write to handoff-${SESSION_ID}.md in ${ESCAPED_DIR}/. After writing the handoff, tell the user to /clear and /resume to continue with full context."
+  "additionalContext": "Context getting low (${REMAINING}% remaining${ESTIMATED}): Please run /handoff to preserve progress to handoff-${SESSION_ID}.md in ${ESCAPED_DIR}/. After saving, suggest the user /clear and /replay to continue with full context."
 }
 EOF
 exit 0

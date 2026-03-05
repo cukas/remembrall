@@ -17,18 +17,8 @@ if [ -z "$CWD" ]; then
   exit 0
 fi
 
-# For fresh session starts (not compact/clear): check bridge and nudge if missing
+# For fresh session starts (not compact/clear): just exit (bridge is optional now)
 if [ "$SOURCE" != "compact" ] && [ "$SOURCE" != "clear" ]; then
-  if ! remembrall_find_bridge "$CWD" >/dev/null 2>&1; then
-    cat <<EOF
-{
-  "hookSpecificOutput": {
-    "hookEventName": "SessionStart",
-    "additionalContext": "Remembrall: The context-monitor bridge is not set up. Run /setup-remembrall to enable real-time context tracking. Without it, Remembrall falls back to transcript-size estimation (less accurate). The safety net and auto-resume layers still work."
-  }
-}
-EOF
-  fi
   exit 0
 fi
 
@@ -54,14 +44,29 @@ else
   done
 fi
 
+# Also check team handoff directory if enabled
+if [ -z "$HANDOFF_FILE" ] && remembrall_team_enabled; then
+  TEAM_DIR=$(remembrall_team_handoff_dir "$CWD")
+  if [ -d "$TEAM_DIR" ]; then
+    for f in "$TEAM_DIR"/handoff-*.md; do
+      [ -f "$f" ] || continue
+      if [ -z "$HANDOFF_FILE" ] || [ "$f" -nt "$HANDOFF_FILE" ]; then
+        HANDOFF_FILE="$f"
+      fi
+    done
+  fi
+fi
+
 # No handoff found
 if [ -z "$HANDOFF_FILE" ] || [ ! -f "$HANDOFF_FILE" ]; then
   exit 0
 fi
 
-# Check age — skip stale handoffs (older than 24h)
+# Check age — skip stale handoffs (older than configured retention)
+RETENTION_HOURS=$(remembrall_retention_hours)
+RETENTION_SECS=$((RETENTION_HOURS * 3600))
 FILE_AGE=$(remembrall_file_age "$HANDOFF_FILE")
-if [ "$FILE_AGE" -gt 86400 ]; then
+if [ "$FILE_AGE" -gt "$RETENTION_SECS" ]; then
   rm -f "$HANDOFF_FILE"
   exit 0
 fi
@@ -72,6 +77,18 @@ mv "$HANDOFF_FILE" "$CLAIMED_FILE" 2>/dev/null || exit 0
 
 # Read handoff content
 CONTENT=$(cat "$CLAIMED_FILE")
+
+# Extract frontmatter metadata if present
+PATCH_PATH=$(remembrall_frontmatter_get "$CLAIMED_FILE" "patch")
+FM_BRANCH=$(remembrall_frontmatter_get "$CLAIMED_FILE" "branch")
+FM_COMMIT=$(remembrall_frontmatter_get "$CLAIMED_FILE" "commit")
+
+GIT_CONTEXT=""
+if [ -n "$PATCH_PATH" ] && [ -f "$PATCH_PATH" ]; then
+  PATCH_LINES=$(wc -l < "$PATCH_PATH" | tr -d ' ')
+  GIT_RAW="GIT STATE: Branch was '${FM_BRANCH}', commit was '${FM_COMMIT}'. A patch file exists at ${PATCH_PATH} (${PATCH_LINES} lines) with the session's uncommitted changes. Use /replay to verify and restore."
+  GIT_CONTEXT="\\n\\n$(remembrall_escape_json "$GIT_RAW")"
+fi
 
 # Count other handoff files (for awareness) — using glob, not ls
 OTHER_COUNT=0
@@ -96,7 +113,7 @@ cat <<EOF
 {
   "hookSpecificOutput": {
     "hookEventName": "SessionStart",
-    "additionalContext": "SESSION HANDOFF LOADED — Resume the work described below. Summarize to the user what was being worked on, what was completed, and what remains. Ask if they want to continue.\n\n${ESCAPED_CONTENT}${ESCAPED_NOTE}"
+    "additionalContext": "SESSION HANDOFF LOADED — Resume the work described below. Summarize to the user what was being worked on, what was completed, and what remains. Ask if they want to continue.\n\n${ESCAPED_CONTENT}${GIT_CONTEXT}${ESCAPED_NOTE}"
   }
 }
 EOF
