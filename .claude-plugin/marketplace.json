@@ -1,0 +1,24 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "remembrall",
+  "description": "Context handoff plugins for Claude Code",
+  "owner": {
+    "name": "cukas",
+    "email": "noreply@github.com"
+  },
+  "plugins": [
+    {
+      "name": "remembrall",
+      "description": "Automatic context handoff — monitors context window %, auto-triggers handoffs at 30% remaining, auto-resumes on compaction/clear",
+      "version": "1.0.0",
+      "author": {
+        "name": "cukas",
+        "email": "noreply@github.com"
+      },
+      "source": ".",
+      "category": "productivity",
+      "homepage": "https://github.com/cukas/remembrall",
+      "tags": ["context", "handoff", "memory", "session", "productivity"]
+    }
+  ]
+}
