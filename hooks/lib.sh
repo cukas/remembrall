@@ -178,6 +178,40 @@ remembrall_calibrated_max() {
   echo "$avg"
 }
 
+# ─── Context Gauge ────────────────────────────────────────────────
+
+# Render a visual context gauge with color.
+# Usage: remembrall_gauge 42
+# Output: [████░░░░░░] 42%
+# Colors: green >60%, orange 21-60%, red <=20%
+remembrall_gauge() {
+  local pct="${1%%.*}"  # truncate decimal
+  [ -z "$pct" ] && pct=0
+
+  local width=10
+  local filled=$((pct * width / 100))
+  [ "$filled" -gt "$width" ] && filled=$width
+  [ "$filled" -lt 0 ] && filled=0
+  local empty=$((width - filled))
+
+  local bar=""
+  local i
+  for ((i=0; i<filled; i++)); do bar+="█"; done
+  for ((i=0; i<empty; i++)); do bar+="░"; done
+
+  # ANSI colors: green=32, orange/yellow=33, red=31
+  local color
+  if [ "$pct" -le 20 ] 2>/dev/null; then
+    color="31"  # red
+  elif [ "$pct" -le 60 ] 2>/dev/null; then
+    color="33"  # orange/yellow
+  else
+    color="32"  # green
+  fi
+
+  printf '\033[%sm[%s]\033[0m %s%%' "$color" "$bar" "$pct"
+}
+
 # ─── Integer Comparison ──────────────────────────────────────────
 
 # Compare a number (possibly decimal) against an integer threshold.

@@ -43,5 +43,6 @@ if remembrall_ge "$REMAINING" 40; then
 fi
 
 # Output to stderr — shown to user in terminal without risking Claude re-engagement
-echo "Remembrall: Context is at ${REMAINING}%${ESTIMATED} remaining. Consider /clear + /replay before starting new work." >&2
+GAUGE=$(remembrall_gauge "$REMAINING")
+echo "Remembrall: ${GAUGE} Context is at ${REMAINING}%${ESTIMATED} remaining. Consider /clear + /replay before starting new work." >&2
 exit 0

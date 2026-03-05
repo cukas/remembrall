@@ -61,9 +61,10 @@ if remembrall_gt "$REMAINING" 30; then
     exit 0
   fi
   echo "journal" > "$NUDGE_FILE"
+  GAUGE=$(remembrall_gauge "$REMAINING")
   cat << EOF
 {
-  "additionalContext": "Context checkpoint (${REMAINING}% remaining${ESTIMATED}): Good time to run /handoff and save a progress snapshot. This is informational — continue working after saving."
+  "additionalContext": "${GAUGE} Context checkpoint (${REMAINING}% remaining${ESTIMATED}): Good time to run /handoff and save a progress snapshot. This is informational — continue working after saving."
 }
 EOF
   exit 0
@@ -79,9 +80,10 @@ if remembrall_le "$REMAINING" 20; then
     exit 0
   fi
   echo "urgent" > "$NUDGE_FILE"
+  GAUGE=$(remembrall_gauge "$REMAINING")
   cat << EOF
 {
-  "additionalContext": "Context critically low (${REMAINING}% remaining${ESTIMATED}): Please run /handoff to save progress to handoff-${SESSION_ID}.md in ${ESCAPED_DIR}/, then suggest the user /clear and /replay to continue with full context."
+  "additionalContext": "${GAUGE} Context critically low (${REMAINING}% remaining${ESTIMATED}): Please run /handoff to save progress to handoff-${SESSION_ID}.md in ${ESCAPED_DIR}/, then suggest the user /clear and /replay to continue with full context."
 }
 EOF
   exit 0
@@ -92,9 +94,10 @@ if [ "$LAST_NUDGE" = "warning" ]; then
   exit 0
 fi
 echo "warning" > "$NUDGE_FILE"
+GAUGE=$(remembrall_gauge "$REMAINING")
 cat << EOF
 {
-  "additionalContext": "Context getting low (${REMAINING}% remaining${ESTIMATED}): Please run /handoff to preserve progress to handoff-${SESSION_ID}.md in ${ESCAPED_DIR}/. After saving, suggest the user /clear and /replay to continue with full context."
+  "additionalContext": "${GAUGE} Context getting low (${REMAINING}% remaining${ESTIMATED}): Please run /handoff to preserve progress to handoff-${SESSION_ID}.md in ${ESCAPED_DIR}/. After saving, suggest the user /clear and /replay to continue with full context."
 }
 EOF
 exit 0
