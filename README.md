@@ -1,6 +1,6 @@
 # Remembrall
 
-*"It glows when you've forgotten something" — like your entire context window.*
+*"It glows when you've forgotten something" — like your entire context window."*
 
 **Context runs out → work gets lost.** Remembrall fixes that.
 
