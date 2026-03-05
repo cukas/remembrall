@@ -2,6 +2,9 @@
 # UserPromptSubmit hook: monitors actual context % via status-line bridge
 # Triggers structured /handoff at 30% remaining, urgent at 20%
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+source "$SCRIPT_DIR/lib.sh"
+
 INPUT=$(cat)
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // "default"')
 CWD=$(echo "$INPUT" | jq -r '.cwd // empty')
@@ -11,20 +14,8 @@ if [ -z "$CWD" ]; then
   exit 0
 fi
 
-# Cross-platform md5 hash of CWD
-if command -v md5 >/dev/null 2>&1; then
-  CWD_HASH=$(md5 -qs "$CWD")
-elif command -v md5sum >/dev/null 2>&1; then
-  CWD_HASH=$(printf '%s' "$CWD" | md5sum | cut -d' ' -f1)
-else
-  exit 0
-fi
-
-# Read context % from bridge file (written by status line)
-CTX_FILE="/tmp/claude-context-pct/$CWD_HASH"
-if [ ! -f "$CTX_FILE" ]; then
-  exit 0
-fi
+# Find bridge file (checks CWD + parent dirs)
+CTX_FILE=$(remembrall_find_bridge "$CWD") || exit 0
 
 REMAINING=$(cat "$CTX_FILE" 2>/dev/null)
 if [ -z "$REMAINING" ]; then
@@ -36,7 +27,6 @@ NUDGE_DIR="/tmp/remembrall-nudges"
 mkdir -p "$NUDGE_DIR"
 NUDGE_FILE="$NUDGE_DIR/$SESSION_ID"
 
-# Check if we already nudged at this level
 LAST_NUDGE=""
 if [ -f "$NUDGE_FILE" ]; then
   LAST_NUDGE=$(cat "$NUDGE_FILE")
@@ -53,10 +43,11 @@ if (( $(echo "$REMAINING > 30" | bc -l 2>/dev/null || echo 0) )); then
   exit 0
 fi
 
-# Determine handoff directory for this project
+# Handoff directory uses the hook's own CWD hash (not the bridge's)
+CWD_HASH=$(remembrall_md5 "$CWD") || exit 0
 HANDOFF_DIR="$HOME/.remembrall/handoffs/$CWD_HASH"
 
-# <=20% — URGENT (only if we haven't already sent urgent)
+# <=20% — URGENT
 if (( $(echo "$REMAINING <= 20" | bc -l 2>/dev/null || echo 0) )); then
   if [ "$LAST_NUDGE" = "urgent" ]; then
     exit 0
@@ -70,7 +61,7 @@ EOF
   exit 0
 fi
 
-# <=30% — first nudge (only if we haven't already sent warning)
+# <=30% — warning
 if [ "$LAST_NUDGE" = "warning" ] || [ "$LAST_NUDGE" = "urgent" ]; then
   exit 0
 fi

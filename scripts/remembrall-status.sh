@@ -1,24 +1,19 @@
 #!/usr/bin/env bash
 # Remembrall diagnostic script — checks bridge, handoffs, nudges, settings
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+source "$SCRIPT_DIR/../hooks/lib.sh"
+
 CWD="${1:-$(pwd)}"
 
-# Cross-platform md5
-if command -v md5 >/dev/null 2>&1; then
-  CWD_HASH=$(md5 -qs "$CWD")
-elif command -v md5sum >/dev/null 2>&1; then
-  CWD_HASH=$(printf '%s' "$CWD" | md5sum | cut -d' ' -f1)
-else
-  echo "Error: no md5 or md5sum found"
-  exit 1
-fi
+CWD_HASH=$(remembrall_md5 "$CWD") || { echo "Error: no md5 or md5sum found"; exit 1; }
 
 echo "Remembrall Status"
 echo "─────────────────"
 
-# Bridge
-CTX_FILE="/tmp/claude-context-pct/$CWD_HASH"
-if [ -f "$CTX_FILE" ]; then
+# Bridge — check CWD + parent dirs
+CTX_FILE=$(remembrall_find_bridge "$CWD")
+if [ -n "$CTX_FILE" ]; then
   echo "Bridge:    OK ($(cat "$CTX_FILE")% remaining)"
 else
   echo "Bridge:    NOT FOUND — run /setup-remembrall"
