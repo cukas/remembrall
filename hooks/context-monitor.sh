@@ -45,8 +45,9 @@ if (( $(echo "$REMAINING > 30" | bc -l 2>/dev/null || echo 0) )); then
   exit 0
 fi
 
-# Handoff directory
+# Handoff directory (escaped for safe JSON embedding)
 HANDOFF_DIR=$(remembrall_handoff_dir "$CWD") || exit 0
+ESCAPED_DIR=$(remembrall_escape_json "$HANDOFF_DIR")
 
 # <=20% — URGENT (only suppress if urgent already sent; allows escalation from warning)
 if (( $(echo "$REMAINING <= 20" | bc -l 2>/dev/null || echo 0) )); then
@@ -56,7 +57,7 @@ if (( $(echo "$REMAINING <= 20" | bc -l 2>/dev/null || echo 0) )); then
   echo "urgent" > "$NUDGE_FILE"
   cat << EOF
 {
-  "additionalContext": "CONTEXT MONITOR URGENT (${REMAINING}% remaining): STOP all work immediately. Auto-run /handoff NOW — write to handoff-${SESSION_ID}.md in ${HANDOFF_DIR}/. Then tell the user to /clear and /resume. Do NOT start any new tool calls."
+  "additionalContext": "CONTEXT MONITOR URGENT (${REMAINING}% remaining): STOP all work immediately. Auto-run /handoff NOW — write to handoff-${SESSION_ID}.md in ${ESCAPED_DIR}/. Then tell the user to /clear and /resume. Do NOT start any new tool calls."
 }
 EOF
   exit 0
@@ -69,7 +70,7 @@ fi
 echo "warning" > "$NUDGE_FILE"
 cat << EOF
 {
-  "additionalContext": "CONTEXT MONITOR (${REMAINING}% remaining): Context is getting low. Auto-run /handoff NOW to preserve your work — write to handoff-${SESSION_ID}.md in ${HANDOFF_DIR}/. After writing the handoff, tell the user to /clear and /resume to continue with full context."
+  "additionalContext": "CONTEXT MONITOR (${REMAINING}% remaining): Context is getting low. Auto-run /handoff NOW to preserve your work — write to handoff-${SESSION_ID}.md in ${ESCAPED_DIR}/. After writing the handoff, tell the user to /clear and /resume to continue with full context."
 }
 EOF
 exit 0

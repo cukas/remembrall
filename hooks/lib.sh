@@ -47,14 +47,16 @@ remembrall_handoff_dir() {
   echo "$HOME/.remembrall/handoffs/$hash"
 }
 
-# Cross-platform file age in seconds
+# Cross-platform file age in seconds (returns 0 on stat failure)
 remembrall_file_age() {
   local file="$1"
+  local mtime
   if [ "$(uname)" = "Darwin" ]; then
-    echo $(( $(date +%s) - $(stat -f %m "$file") ))
+    mtime=$(stat -f %m "$file" 2>/dev/null) || { echo 0; return; }
   else
-    echo $(( $(date +%s) - $(stat -c %Y "$file") ))
+    mtime=$(stat -c %Y "$file" 2>/dev/null) || { echo 0; return; }
   fi
+  echo $(( $(date +%s) - mtime ))
 }
 
 # JSON-safe string escaping using jq (RFC 8259 compliant)

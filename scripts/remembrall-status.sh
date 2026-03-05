@@ -6,7 +6,7 @@ source "$SCRIPT_DIR/../hooks/lib.sh"
 
 CWD="${1:-$(pwd)}"
 
-CWD_HASH=$(remembrall_md5 "$CWD") || { echo "Error: no md5 or md5sum found"; exit 1; }
+HANDOFF_DIR=$(remembrall_handoff_dir "$CWD") || { echo "Error: no md5 or md5sum found"; exit 1; }
 
 echo "Remembrall Status"
 echo "─────────────────"
@@ -20,7 +20,6 @@ else
 fi
 
 # Handoffs — use glob count instead of ls|wc
-HANDOFF_DIR="$HOME/.remembrall/handoffs/$CWD_HASH"
 if [ -d "$HANDOFF_DIR" ]; then
   COUNT=0
   for f in "$HANDOFF_DIR"/handoff-*.md; do [ -f "$f" ] && COUNT=$((COUNT + 1)); done
