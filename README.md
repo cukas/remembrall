@@ -156,6 +156,16 @@ You're walking Claude through a complex codebase architecture so it can help new
 | Nudge dir | `/tmp/claude-context-nudges/` | `/tmp/remembrall-nudges/` |
 | SessionStart | Bare `additionalContext` | `hookSpecificOutput` format |
 
+## Privacy
+
+Remembrall is fully local. It does not collect, transmit, or store any data outside your machine.
+
+- Handoff files are stored in `~/.remembrall/handoffs/` on your local filesystem
+- Temporary bridge files live in `/tmp/` and are cleared on reboot
+- No network requests, no analytics, no telemetry
+- No external services or APIs are contacted
+- All processing happens in local shell scripts
+
 ## License
 
 MIT
