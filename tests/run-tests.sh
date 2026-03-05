@@ -338,27 +338,47 @@ rm -f "$CTX_DIR/$HASH"
 echo ""
 echo "remembrall_frontmatter_get:"
 
+# ── JSON frontmatter (new format) ──
 FM_FILE="$TMPDIR_ROOT/test_handoff.md"
 cat > "$FM_FILE" << 'FMEOF'
 ---
-created: 2026-03-05T14:30:00Z
-session_id: abc123
-branch: main
-commit: deadbeef
-patch: /tmp/patch.diff
-team: true
+{
+  "created": "2026-03-05T14:30:00Z",
+  "session_id": "abc123",
+  "branch": "main",
+  "commit": "deadbeef",
+  "patch": "/tmp/patch.diff",
+  "team": true,
+  "files": ["src/app.ts", "src/lib.ts"]
+}
 ---
 
 # Session Handoff
 Content here.
 FMEOF
 
-assert_eq "extracts created" "2026-03-05T14:30:00Z" "$(remembrall_frontmatter_get "$FM_FILE" "created")"
-assert_eq "extracts session_id" "abc123" "$(remembrall_frontmatter_get "$FM_FILE" "session_id")"
-assert_eq "extracts branch" "main" "$(remembrall_frontmatter_get "$FM_FILE" "branch")"
-assert_eq "extracts commit" "deadbeef" "$(remembrall_frontmatter_get "$FM_FILE" "commit")"
-assert_eq "extracts patch" "/tmp/patch.diff" "$(remembrall_frontmatter_get "$FM_FILE" "patch")"
-assert_eq "missing key returns empty" "" "$(remembrall_frontmatter_get "$FM_FILE" "nonexistent")"
+assert_eq "JSON: extracts created" "2026-03-05T14:30:00Z" "$(remembrall_frontmatter_get "$FM_FILE" "created")"
+assert_eq "JSON: extracts session_id" "abc123" "$(remembrall_frontmatter_get "$FM_FILE" "session_id")"
+assert_eq "JSON: extracts branch" "main" "$(remembrall_frontmatter_get "$FM_FILE" "branch")"
+assert_eq "JSON: extracts commit" "deadbeef" "$(remembrall_frontmatter_get "$FM_FILE" "commit")"
+assert_eq "JSON: extracts patch" "/tmp/patch.diff" "$(remembrall_frontmatter_get "$FM_FILE" "patch")"
+assert_eq "JSON: missing key returns empty" "" "$(remembrall_frontmatter_get "$FM_FILE" "nonexistent")"
+
+# ── YAML frontmatter (legacy backward compat) ──
+FM_LEGACY="$TMPDIR_ROOT/test_handoff_legacy.md"
+cat > "$FM_LEGACY" << 'FMEOF'
+---
+created: 2026-03-05T14:30:00Z
+session_id: legacy123
+branch: develop
+commit: cafe1234
+---
+
+# Legacy Handoff
+FMEOF
+
+assert_eq "YAML legacy: extracts session_id" "legacy123" "$(remembrall_frontmatter_get "$FM_LEGACY" "session_id")"
+assert_eq "YAML legacy: extracts branch" "develop" "$(remembrall_frontmatter_get "$FM_LEGACY" "branch")"
 
 # ── remembrall_team_handoff_dir ───────────────────────────────────
 echo ""
@@ -440,13 +460,15 @@ HANDOFF_DIR="$HOME/.remembrall/handoffs/$HASH"
 mkdir -p "$HANDOFF_DIR"
 cat > "$HANDOFF_DIR/handoff-test-resume.md" << 'HEOF'
 ---
-created: 2026-03-05T14:30:00Z
-session_id: test-resume
-project: /tmp/test
-status: in_progress
-branch: main
-commit: abc1234
-patch:
+{
+  "created": "2026-03-05T14:30:00Z",
+  "session_id": "test-resume",
+  "project": "/tmp/test",
+  "status": "in_progress",
+  "branch": "main",
+  "commit": "abc1234",
+  "patch": ""
+}
 ---
 
 # Session Handoff
@@ -529,9 +551,9 @@ assert_match "outputs handoff path" 'handoff-test-create-sess\.md$' "$OUTPUT"
 
 # Verify file was created and has correct content
 if [ -f "$OUTPUT" ]; then
-  assert_match "handoff has YAML frontmatter" '^---' "$(head -1 "$OUTPUT")"
+  assert_match "handoff has frontmatter" '^---' "$(head -1 "$OUTPUT")"
   assert_match "handoff has session_id" 'session_id.*test-create-sess' "$(cat "$OUTPUT")"
-  assert_match "handoff has status" 'status: in_progress' "$(cat "$OUTPUT")"
+  assert_match "handoff has status" '"status".*"in_progress"' "$(cat "$OUTPUT")"
   assert_match "handoff has files" 'widget.ts' "$(cat "$OUTPUT")"
   assert_match "handoff has tasks" 'Add tests' "$(cat "$OUTPUT")"
   assert_match "handoff has markdown content" 'Build the widget' "$(cat "$OUTPUT")"
@@ -603,16 +625,14 @@ mkdir -p "$HANDOFF_DIR"
 # Create two handoff files
 cat > "$HANDOFF_DIR/handoff-sess-A.md" << 'EOF'
 ---
-session_id: sess-A
-status: in_progress
+{"session_id": "sess-A", "status": "in_progress"}
 ---
 # Handoff A
 EOF
 
 cat > "$HANDOFF_DIR/handoff-sess-B.md" << 'EOF'
 ---
-session_id: sess-B
-status: in_progress
+{"session_id": "sess-B", "status": "in_progress"}
 ---
 # Handoff B
 EOF

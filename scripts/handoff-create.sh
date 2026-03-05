@@ -104,24 +104,19 @@ if remembrall_git_enabled "$CWD"; then
   fi
 fi
 
-# ─── Build YAML frontmatter ─────────────────────────────────────
+# ─── Build JSON frontmatter ────────────────────────────────────
 
-# Files list
-FILES_YAML=""
-IFS=',' read -ra FILE_ARRAY <<< "$FILES_CSV"
-for fp in "${FILE_ARRAY[@]}"; do
-  fp=$(echo "$fp" | xargs)
-  [ -z "$fp" ] && continue
-  FILES_YAML="${FILES_YAML}
-  - ${fp}"
-done
+# Files array
+FILES_JSON="[]"
+if [ -n "$FILES_CSV" ]; then
+  FILES_JSON=$(printf '%s' "$FILES_CSV" | tr ',' '\n' | sed 's/^ *//;s/ *$//' | grep -v '^$' | jq -R . | jq -s '.')
+fi
 
-# Tasks list
-TASKS_YAML=""
-for task in "${TASKS[@]}"; do
-  TASKS_YAML="${TASKS_YAML}
-  - \"${task}\""
-done
+# Tasks array
+TASKS_JSON="[]"
+if [ "${#TASKS[@]}" -gt 0 ]; then
+  TASKS_JSON=$(printf '%s\n' "${TASKS[@]}" | jq -R . | jq -s '.')
+fi
 
 # Previous session for chain linking
 PREV_SESSION=$(remembrall_previous_session "$CWD" "$SESSION_ID" 2>/dev/null || echo "")
@@ -133,22 +128,36 @@ NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 # ─── Write handoff file ─────────────────────────────────────────
 
-cat > "$HANDOFF_FILE" << REMEMBRALL_EOF
----
-created: "${NOW}"
-session_id: "${SESSION_ID}"
-previous_session: ${PREV_SESSION:-}
-project: "${CWD}"
-status: ${STATUS}
-branch: "${BRANCH}"
-commit: "${COMMIT}"
-patch: "${PATCH_FILE}"
-files:${FILES_YAML}
-tasks:${TASKS_YAML}
-team: ${TEAM_MODE}
----
-
-REMEMBRALL_EOF
+{
+  echo '---'
+  jq -n \
+    --arg created "$NOW" \
+    --arg session_id "$SESSION_ID" \
+    --arg previous_session "${PREV_SESSION:-}" \
+    --arg project "$CWD" \
+    --arg status "$STATUS" \
+    --arg branch "$BRANCH" \
+    --arg commit "$COMMIT" \
+    --arg patch "$PATCH_FILE" \
+    --argjson files "$FILES_JSON" \
+    --argjson tasks "$TASKS_JSON" \
+    --argjson team "${TEAM_MODE}" \
+    '{
+      created: $created,
+      session_id: $session_id,
+      previous_session: $previous_session,
+      project: $project,
+      status: $status,
+      branch: $branch,
+      commit: $commit,
+      patch: $patch,
+      files: $files,
+      tasks: $tasks,
+      team: $team
+    }'
+  echo '---'
+  echo ''
+} > "$HANDOFF_FILE"
 
 # Append the markdown content (via printf to prevent shell expansion)
 printf '%s\n' "$CONTENT" >> "$HANDOFF_FILE"

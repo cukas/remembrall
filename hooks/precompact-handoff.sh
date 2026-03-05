@@ -44,7 +44,8 @@ if [ -f "$HANDOFF_FILE" ]; then
     exit 0
   fi
   # Never overwrite a skill-generated handoff — it is higher quality
-  if ! grep -q "type: auto-generated" "$HANDOFF_FILE" 2>/dev/null && \
+  if ! grep -q '"type".*"auto-generated"' "$HANDOFF_FILE" 2>/dev/null && \
+     ! grep -q "type: auto-generated" "$HANDOFF_FILE" 2>/dev/null && \
      ! grep -q "Type: Auto-generated" "$HANDOFF_FILE" 2>/dev/null; then
     echo "Handoff exists and was skill-generated. Preserving." >&2
     exit 0
@@ -110,6 +111,19 @@ GIT_OPS=$(echo "$EXTRACTED" | grep '^GIT:' | sed 's/^GIT://' | tail -20)
 TASK_STATE=$(echo "$EXTRACTED" | grep '^TASK:' | sed 's/^TASK://' | tail -30)
 RECENT_EXCHANGES=$(echo "$EXTRACTED" | grep '^CONV:' | sed 's/^CONV://' | tail -80)
 
+# Extract the user's first substantive message as the session goal
+USER_GOAL=$(jq -r '
+  select(.type == "human") |
+  .content // "" |
+  if type == "array" then
+    map(select(.type == "text") | .text) | join(" ")
+  else
+    tostring
+  end |
+  select(length > 10) |
+  .[0:500]
+' "$TRANSCRIPT_PATH" 2>/dev/null | head -1)
+
 # ─── Git state capture ────────────────────────────────────────────
 BRANCH=""
 COMMIT=""
@@ -138,13 +152,8 @@ if remembrall_git_enabled "$CWD"; then
   fi
 fi
 
-# Build YAML files list
-FILES_YAML=""
-while IFS= read -r fp; do
-  [ -z "$fp" ] && continue
-  FILES_YAML="${FILES_YAML}
-  - ${fp}"
-done <<< "$FILE_PATHS"
+# Build JSON files array
+FILES_JSON=$(printf '%s\n' "$FILE_PATHS" | grep -v '^$' | head -50 | jq -R . | jq -s '.')
 
 # Determine team mode
 TEAM_MODE=$(remembrall_config "team_handoffs" "false")
@@ -155,21 +164,39 @@ PREV_SESSION=$(remembrall_previous_session "$CWD" "$SESSION_ID" 2>/dev/null || e
 # Capture timestamp once for consistency
 NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
-# Write YAML frontmatter + header
-cat > "$HANDOFF_FILE" << REMEMBRALL_FRONTMATTER
----
-created: "${NOW}"
-session_id: "${SESSION_ID}"
-previous_session: ${PREV_SESSION:-}
-project: "${CWD}"
-status: interrupted
-type: auto-generated
-branch: "${BRANCH}"
-commit: "${COMMIT}"
-patch: "${PATCH_FILE}"
-files:${FILES_YAML}
-team: ${TEAM_MODE}
----
+# Write JSON frontmatter + header
+{
+  echo '---'
+  jq -n \
+    --arg created "$NOW" \
+    --arg session_id "$SESSION_ID" \
+    --arg previous_session "${PREV_SESSION:-}" \
+    --arg project "$CWD" \
+    --arg status "interrupted" \
+    --arg type "auto-generated" \
+    --arg branch "$BRANCH" \
+    --arg commit "$COMMIT" \
+    --arg patch "$PATCH_FILE" \
+    --argjson files "$FILES_JSON" \
+    --argjson team "${TEAM_MODE}" \
+    '{
+      created: $created,
+      session_id: $session_id,
+      previous_session: $previous_session,
+      project: $project,
+      status: $status,
+      type: $type,
+      branch: $branch,
+      commit: $commit,
+      patch: $patch,
+      files: $files,
+      team: $team
+    }'
+  echo '---'
+} > "$HANDOFF_FILE"
+
+# Append header
+cat >> "$HANDOFF_FILE" << REMEMBRALL_HEADER
 
 # Session Handoff
 
@@ -188,10 +215,16 @@ Resume the work described below. Check the task list (/tasks) for pending items.
 
 ---
 
-REMEMBRALL_FRONTMATTER
+REMEMBRALL_HEADER
 
 # Write content sections safely — untrusted content via printf to prevent shell expansion
 {
+  if [ -n "$USER_GOAL" ]; then
+    echo '## Session Goal'
+    echo ''
+    printf '%s\n' "$USER_GOAL"
+    echo ''
+  fi
   echo '## Files Touched This Session'
   echo ''
   echo '```'

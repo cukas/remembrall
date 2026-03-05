@@ -98,9 +98,17 @@ Remembrall monitors your context window in real-time, keeps a running session jo
 
 ## Installation
 
-### 1. Enable the plugin
+### Quick install
 
-Add to `~/.claude/settings.json`:
+```bash
+claude plugin install remembrall@cukas
+```
+
+That's it. Run `/remembrall-status` to verify.
+
+### Manual install
+
+If the marketplace install isn't available, add to `~/.claude/settings.json`:
 
 ```json
 {
@@ -110,13 +118,9 @@ Add to `~/.claude/settings.json`:
 }
 ```
 
-Or install from the plugin marketplace if available.
+Then run `/remembrall-status` to check everything is working.
 
-### 2. Verify
-
-Run `/remembrall-status` to check everything is working. That's it — Remembrall works out of the box.
-
-### 3. Optional: Set up the status-line bridge (for maximum precision)
+### Optional: Set up the status-line bridge (for maximum precision)
 
 The self-calibrating estimator is accurate after 1-2 sessions. For immediate precision on the first session, you can optionally run `/setup-remembrall` to install a status-line bridge that writes exact context % to a temp file.
 

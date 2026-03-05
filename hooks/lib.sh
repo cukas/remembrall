@@ -353,11 +353,25 @@ remembrall_previous_session() {
 
 # ─── Frontmatter ──────────────────────────────────────────────────
 
-# Parse YAML frontmatter value from a handoff file (scalar values only).
-# Does NOT work for multi-line YAML values like lists (files:, tasks:).
+# Parse frontmatter value from a handoff file.
+# Supports both JSON frontmatter (new format) and YAML frontmatter (legacy).
 # Usage: remembrall_frontmatter_get "file.md" "key"
 remembrall_frontmatter_get() {
   local file="$1"
   local key="$2"
-  sed -n '/^---$/,/^---$/p' "$file" 2>/dev/null | grep "^${key}:" | sed "s/^${key}: *//"
+
+  # Extract content between the first pair of --- markers only
+  local block
+  block=$(awk '/^---$/ { if (++c == 2) exit; next } c == 1 { print }' "$file" 2>/dev/null) || return
+
+  # Try JSON parse first (new format)
+  local val
+  val=$(printf '%s' "$block" | jq -r --arg k "$key" '.[$k] // empty' 2>/dev/null)
+  if [ -n "$val" ] && [ "$val" != "null" ]; then
+    echo "$val"
+    return
+  fi
+
+  # Legacy YAML fallback — simple key: value lines only
+  printf '%s\n' "$block" | grep "^${key}:" | sed "s/^${key}: *//" | head -1
 }
