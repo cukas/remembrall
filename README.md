@@ -119,6 +119,32 @@ Handoff files are stored per-project:
 - Handoffs older than 24 hours are auto-cleaned
 - Consumed handoffs are deleted immediately (single-use baton)
 
+## Example Use Cases
+
+### Long refactors that outlast a single context
+
+You're renaming a module across 40 files. Halfway through, context hits 30%. Remembrall nudges Claude to `/handoff` — it captures which files are done, which remain, and the naming convention you agreed on. After `/clear`, the next session picks up at file 21, not file 1.
+
+### Multi-day feature builds
+
+You're building an auth system over several sessions. Each time you stop for the day, `/handoff` saves your progress: completed routes, pending middleware, the JWT-vs-session decision and why. Next morning, `/resume` — Claude knows exactly where you left off.
+
+### Pair-programming handoffs between terminals
+
+You have two Claude instances open — one for frontend, one for backend. The backend session runs low on context. It writes a handoff. You open a fresh terminal, `/resume`, and the new session continues the API work while the frontend session keeps running undisturbed (separate handoff files, no conflicts).
+
+### Unexpected compaction recovery
+
+You're deep in a debugging session and didn't notice context getting low. Claude auto-compacts. Without remembrall, you'd lose all the debugging context — which files you checked, what theories you ruled out, what the error trace showed. With remembrall, the safety net hook fires just before compaction, extracts the key info from the transcript, and injects it into the compacted session automatically.
+
+### Code reviews and large PRs
+
+You're reviewing a 500-line PR file by file. Context fills up with diff content. At 30%, remembrall triggers — Claude saves which files are reviewed, the issues found so far, and which files still need review. Resume in a fresh session without re-reading files you already covered.
+
+### Teaching and onboarding
+
+You're walking Claude through a complex codebase architecture so it can help new team members. The explanation fills context. `/handoff` preserves the architectural understanding — component relationships, data flow patterns, naming conventions — so any future session can build on it instead of re-explaining from scratch.
+
 ## How It Differs from Project-Specific Setups
 
 | Aspect | Project-specific | Remembrall (plugin) |
