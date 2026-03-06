@@ -23,16 +23,22 @@ remembrall_md5() {
 # Find bridge file by checking CWD and all parent directories.
 # The status line may report a parent dir (e.g. ~) while hooks see the
 # full project path. Walking up ensures we find the match.
+# Ignores stale bridge files (>120s) — falls through to transcript estimation.
 remembrall_find_bridge() {
   local dir="$1"
   local ctx_dir="/tmp/claude-context-pct"
+  local max_age=120
 
   while [ "$dir" != "/" ]; do
     local hash
     hash=$(remembrall_md5 "$dir") || return 1
     if [ -f "$ctx_dir/$hash" ]; then
-      echo "$ctx_dir/$hash"
-      return 0
+      local age
+      age=$(remembrall_file_age "$ctx_dir/$hash")
+      if [ "$age" -le "$max_age" ]; then
+        echo "$ctx_dir/$hash"
+        return 0
+      fi
     fi
     dir=$(dirname "$dir")
   done
