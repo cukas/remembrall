@@ -93,15 +93,7 @@ EXTRACTED=$(jq -r '
     select(.name == "TaskCreate" or .name == "TaskUpdate") |
     "TASK:" + (.input | tostring)
   ),
-  # recent conversation exchanges
-  (
-    select(.type == "human" or .type == "assistant") |
-    if .type == "human" then
-      "CONV:USER: " + (.content // "[tool result]" | tostring | .[0:500])
-    else
-      "CONV:ASSISTANT: " + (.content // "[tool use]" | tostring | .[0:500])
-    end
-  )
+  empty
 ' "$TRANSCRIPT_PATH" 2>/dev/null)
 
 # Split extracted data by prefix
@@ -109,7 +101,6 @@ FILE_PATHS=$(echo "$EXTRACTED" | grep '^FILE:' | sed 's/^FILE://' | sort -u | he
 ERRORS_FOUND=$(echo "$EXTRACTED" | grep '^ERROR:' | sed 's/^ERROR://' | tail -10 | sort -u | tail -5)
 GIT_OPS=$(echo "$EXTRACTED" | grep '^GIT:' | sed 's/^GIT://' | tail -20)
 TASK_STATE=$(echo "$EXTRACTED" | grep '^TASK:' | sed 's/^TASK://' | tail -30)
-RECENT_EXCHANGES=$(echo "$EXTRACTED" | grep '^CONV:' | sed 's/^CONV://' | tail -80)
 
 # Extract the user's first substantive message as the session goal
 USER_GOAL=$(jq -r '
@@ -247,12 +238,6 @@ REMEMBRALL_HEADER
   echo ''
   echo '```'
   printf '%s\n' "$TASK_STATE"
-  echo '```'
-  echo ''
-  echo '## Recent Conversation (last ~40 exchanges)'
-  echo ''
-  echo '```'
-  printf '%s\n' "$RECENT_EXCHANGES"
   echo '```'
 } >> "$HANDOFF_FILE"
 
