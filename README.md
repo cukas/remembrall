@@ -2,6 +2,10 @@
 
 *"It glows when you've forgotten something" — like your entire context window.*
 
+<p align="center">
+  <img src="docs/remembrall-hero.png" alt="Remembrall — context: 15%" width="400" />
+</p>
+
 **Context runs out → work gets lost.** Remembrall fixes that.
 
 ```bash
@@ -298,6 +302,10 @@ You're walking Claude through a complex codebase architecture so it can help new
 | CWD | Hardcoded fallback | Dynamic from hook input |
 | Nudge dir | `/tmp/claude-context-nudges/` | `/tmp/remembrall-nudges/` |
 | SessionStart | Bare `additionalContext` | `hookSpecificOutput` format |
+
+## FAQ
+
+**Does Remembrall bloat my context?** No. It injects one handoff document on session resume (then deletes it). During a session, nudges appear as short stderr messages that don't consume tokens. There is no accumulated memory that grows over time.
 
 ## Privacy
 
