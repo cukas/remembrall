@@ -5,7 +5,7 @@
 **Context runs out → work gets lost.** Remembrall fixes that.
 
 ```bash
-claude plugin marketplace add github:cukas/remembrall
+claude plugin marketplace add cukas/remembrall
 claude plugin install remembrall@remembrall
 ```
 
@@ -126,7 +126,7 @@ Remembrall monitors your context window in real-time, keeps a running session jo
 ### Install
 
 ```bash
-claude plugin marketplace add github:cukas/remembrall
+claude plugin marketplace add cukas/remembrall
 claude plugin install remembrall@remembrall
 ```
 
