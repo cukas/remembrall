@@ -1,6 +1,24 @@
 # Remembrall
 
-A Claude Code plugin that automatically preserves your work when context runs low.
+*"It glows when you've forgotten something" — like your entire context window."*
+
+**Context runs out → work gets lost.** Remembrall fixes that.
+
+```bash
+claude plugin marketplace add cukas/remembrall
+claude plugin install remembrall@cukas
+```
+
+That's it. No setup needed. Remembrall monitors your context, warns you when it's running low, and auto-saves structured handoffs so your next session picks up exactly where you left off.
+
+```
+🟠 [████░░░░░░] 40%  →  /handoff  →  /clear  →  /replay  →  back to work
+```
+
+---
+
+<details>
+<summary><strong>Full documentation</strong></summary>
 
 Remembrall monitors your context window in real-time, keeps a running session journal, warns you at critical thresholds, creates structured handoff documents with git patches, and offers smart replay with state verification. Team handoffs let another developer's Claude session pick up where yours left off.
 
@@ -23,6 +41,13 @@ Remembrall monitors your context window in real-time, keeps a running session jo
 - **Handoff Chains** — Each handoff links to its predecessor via `previous_session`. Across multiple sessions, you get a linked history: session 1 → session 2 → session 3. The replay briefing shows where you are in the chain.
 
 - **Global Config** — One-time setup at `~/.remembrall/config.json` persists settings across all sessions. Configure git integration and team handoffs once, and every Claude session respects them.
+
+- **Visual Context Gauge** — Color-coded progress bar in all nudge messages so you can see context health at a glance:
+  ```
+  🟢 [████████░░] 80%   — plenty of room
+  🟠 [████░░░░░░] 40%   — journal checkpoint / warning
+  🔴 [██░░░░░░░░] 15%   — urgent, run /handoff now
+  ```
 
 ## How It Works
 
@@ -98,27 +123,14 @@ Remembrall monitors your context window in real-time, keeps a running session jo
 
 ## Installation
 
-### Quick install
+### Install
 
 ```bash
+claude plugin marketplace add cukas/remembrall
 claude plugin install remembrall@cukas
 ```
 
-That's it. Run `/remembrall-status` to verify.
-
-### Manual install
-
-If the marketplace install isn't available, add to `~/.claude/settings.json`:
-
-```json
-{
-  "enabledPlugins": {
-    "remembrall@cukas": true
-  }
-}
-```
-
-Then run `/remembrall-status` to check everything is working.
+Run `/remembrall-status` to verify.
 
 ### Optional: Set up the status-line bridge (for maximum precision)
 
@@ -289,3 +301,5 @@ Remembrall is fully local. It does not collect, transmit, or store any data outs
 ## License
 
 MIT
+
+</details>
