@@ -7,6 +7,7 @@
 #
 # Options:
 #   --cwd PATH          Working directory (default: pwd)
+#   --session-id ID     Session ID (default: $CLAUDE_SESSION_ID or timestamp)
 #   --status STATUS     Handoff status: in_progress|blocked|paused (default: in_progress)
 #   --files FILE,...    Comma-separated list of files modified this session
 #   --tasks "T1" "T2"  Remaining tasks (passed as separate args after --tasks)
@@ -25,15 +26,17 @@ remembrall_require_jq
 # ─── Parse arguments ─────────────────────────────────────────────
 
 CWD=""
+SESSION_ID_ARG=""
 STATUS="in_progress"
 FILES_CSV=""
 TASKS=()
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --cwd)    CWD="$2"; shift 2 ;;
-    --status) STATUS="$2"; shift 2 ;;
-    --files)  FILES_CSV="$2"; shift 2 ;;
+    --cwd)        CWD="$2"; shift 2 ;;
+    --session-id) SESSION_ID_ARG="$2"; shift 2 ;;
+    --status)     STATUS="$2"; shift 2 ;;
+    --files)      FILES_CSV="$2"; shift 2 ;;
     --tasks)
       shift
       while [ $# -gt 0 ] && [[ "$1" != --* ]]; do
@@ -46,7 +49,10 @@ while [ $# -gt 0 ]; do
 done
 
 CWD="${CWD:-$(pwd)}"
-SESSION_ID="${CLAUDE_SESSION_ID:-$(date +%s)}"
+
+# Session ID priority: explicit arg > env var > published by hook > timestamp fallback
+PUBLISHED_SESSION=$(remembrall_read_session_id "$CWD" 2>/dev/null || echo "")
+SESSION_ID="${SESSION_ID_ARG:-${CLAUDE_SESSION_ID:-${PUBLISHED_SESSION:-$(date +%s)}}}"
 
 # ─── Read markdown content from stdin ────────────────────────────
 

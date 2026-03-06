@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SessionStart hook: injects handoff content directly on resume
-# Session-aware: finds own session's handoff first, falls back to most recent
+# Only resumes own session's handoff — never picks up other sessions' handoffs
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"
@@ -29,32 +29,23 @@ if [ ! -d "$HANDOFF_DIR" ]; then
   exit 0
 fi
 
+# Only resume own session's handoff — use /replay for other sessions' handoffs
 HANDOFF_FILE=""
-
-# Look for own session's handoff first, then fall back to most recent
 if [ -n "$SESSION_ID" ] && [ -f "$HANDOFF_DIR/handoff-${SESSION_ID}.md" ]; then
   HANDOFF_FILE="$HANDOFF_DIR/handoff-${SESSION_ID}.md"
-else
-  # Find most recent handoff-*.md using glob (no ls parsing)
-  for f in "$HANDOFF_DIR"/handoff-*.md; do
-    [ -f "$f" ] || continue
-    if [ -z "$HANDOFF_FILE" ] || [ "$f" -nt "$HANDOFF_FILE" ]; then
-      HANDOFF_FILE="$f"
-    fi
-  done
 fi
 
-# Also check team handoff directory if enabled
-if [ -z "$HANDOFF_FILE" ] && remembrall_team_enabled; then
-  TEAM_DIR=$(remembrall_team_handoff_dir "$CWD")
-  if [ -d "$TEAM_DIR" ]; then
-    for f in "$TEAM_DIR"/handoff-*.md; do
-      [ -f "$f" ] || continue
-      if [ -z "$HANDOFF_FILE" ] || [ "$f" -nt "$HANDOFF_FILE" ]; then
-        HANDOFF_FILE="$f"
-      fi
-    done
-  fi
+# Recency fallback: if own-session handoff not found, check for one created
+# in the last 60s. Handles /handoff with timestamp ID (CLAUDE_SESSION_ID unavailable).
+if [ -z "$HANDOFF_FILE" ]; then
+  for f in "$HANDOFF_DIR"/handoff-*.md; do
+    [ -f "$f" ] || continue
+    local_age=$(remembrall_file_age "$f")
+    if [ "$local_age" -lt 60 ]; then
+      HANDOFF_FILE="$f"
+      break
+    fi
+  done
 fi
 
 # No handoff found

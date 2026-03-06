@@ -7,12 +7,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"
 
 CWD="${1:-$(pwd)}"
-SESSION_ID="${CLAUDE_SESSION_ID:-}"
 
-# Timestamp fallback when session ID is not in environment
+# Session ID priority: env var > published by hook > timestamp fallback
+PUBLISHED_SESSION=$(remembrall_read_session_id "$CWD" 2>/dev/null || echo "")
+SESSION_ID="${CLAUDE_SESSION_ID:-${PUBLISHED_SESSION:-}}"
+
 if [ -z "$SESSION_ID" ]; then
   SESSION_ID="$(date +%s)"
-  echo "Warning: CLAUDE_SESSION_ID not set, using timestamp fallback. The auto-resume hook will still find this handoff via most-recent-file lookup." >&2
+  echo "Warning: Could not determine session ID. Auto-resume after /clear will NOT find this handoff — use /replay manually." >&2
 fi
 
 HANDOFF_DIR=$(remembrall_handoff_dir "$CWD") || { echo "Error: could not compute handoff directory" >&2; exit 1; }

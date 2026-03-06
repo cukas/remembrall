@@ -54,7 +54,7 @@ fi
 
 # Settings bridge
 if grep -q "claude-context-pct" ~/.claude/settings.json 2>/dev/null; then
-  echo "Settings: Bridge installed"
+  echo "Settings: Bridge installed (session_id keyed)"
 else
   echo "Settings: Bridge MISSING — run /setup-remembrall"
 fi

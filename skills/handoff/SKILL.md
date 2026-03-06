@@ -19,11 +19,12 @@ Create a structured handoff document that any Claude instance can read to resume
    - Test status (passing/failing)
    - Any task list items (check /tasks)
 
-2. **Write the handoff** — Pipe a markdown document to `handoff-create.sh`. The script handles all path computation, git patches, YAML frontmatter, and team copies automatically.
+2. **Write the handoff** — Pipe a markdown document to `handoff-create.sh`. The script handles all path computation, git patches, YAML frontmatter, and team copies automatically. Always pass `--session-id` with `$CLAUDE_SESSION_ID` so the handoff can be found by auto-resume after `/clear`.
 
    ```bash
    cat << 'HANDOFF_CONTENT' | bash "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/plugins/remembrall}/scripts/handoff-create.sh" \
      --cwd "$(pwd)" \
+     --session-id "$CLAUDE_SESSION_ID" \
      --status "in_progress" \
      --files "file1.ts,file2.ts,file3.ts" \
      --tasks "Remaining task 1" "Remaining task 2" "Remaining task 3"

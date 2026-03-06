@@ -20,22 +20,34 @@ remembrall_md5() {
   fi
 }
 
-# Find bridge file by checking CWD and all parent directories.
-# The status line may report a parent dir (e.g. ~) while hooks see the
-# full project path. Walking up ensures we find the match.
+# Find bridge file for a session.
+# Bridge is keyed by session_id only (not CWD) because the status line's
+# workspace.current_dir can differ from the hook's CWD.
+# Without session_id: reads the published session_id for the CWD (diagnostics).
+# Ignores stale bridge files (>120s) — falls through to transcript estimation.
 remembrall_find_bridge() {
-  local dir="$1"
+  local cwd="$1"
+  local session_id="$2"
   local ctx_dir="/tmp/claude-context-pct"
+  local max_age=120
 
-  while [ "$dir" != "/" ]; do
-    local hash
-    hash=$(remembrall_md5 "$dir") || return 1
-    if [ -f "$ctx_dir/$hash" ]; then
-      echo "$ctx_dir/$hash"
+  # Without session_id: try published session_id for this CWD (diagnostic use)
+  if [ -z "$session_id" ]; then
+    session_id=$(remembrall_read_session_id "$cwd" 2>/dev/null)
+  fi
+
+  [ -z "$session_id" ] && return 1
+
+  local f="$ctx_dir/$session_id"
+  if [ -f "$f" ]; then
+    local age
+    age=$(remembrall_file_age "$f")
+    if [ "$age" -le "$max_age" ]; then
+      echo "$f"
       return 0
     fi
-    dir=$(dirname "$dir")
-  done
+  fi
+
   return 1
 }
 
@@ -339,6 +351,32 @@ remembrall_retention_hours() {
 remembrall_team_handoff_dir() {
   local cwd="$1"
   echo "$cwd/.remembrall/handoffs"
+}
+
+# ─── Session ID Publishing ────────────────────────────────────────
+
+# Publish session_id so skill bash commands can read it.
+# Hooks have session_id from JSON input; Bash tool commands don't.
+# Written on every prompt by context-monitor.sh — always current.
+remembrall_publish_session_id() {
+  local cwd="$1"
+  local session_id="$2"
+  [ -z "$session_id" ] && return
+  local hash
+  hash=$(remembrall_md5 "$cwd") || return
+  local dir="/tmp/remembrall-sessions"
+  mkdir -p "$dir" 2>/dev/null
+  printf '%s' "$session_id" > "$dir/$hash" 2>/dev/null
+}
+
+# Read the published session_id for a CWD.
+# Used by handoff-create.sh when CLAUDE_SESSION_ID env var isn't available.
+remembrall_read_session_id() {
+  local cwd="$1"
+  local hash
+  hash=$(remembrall_md5 "$cwd") || return 1
+  local f="/tmp/remembrall-sessions/$hash"
+  [ -f "$f" ] && cat "$f" 2>/dev/null
 }
 
 # ─── Handoff Chains ──────────────────────────────────────────────

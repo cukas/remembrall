@@ -13,7 +13,7 @@ The handoff file is a **single-use baton**. Read it, verify state, restore patch
 
 ## Steps
 
-1. **Find handoff files** — Search both personal and team directories:
+1. **Find handoff files** — Search both personal and team directories. Check for own session's handoff first:
    ```bash
    source "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/plugins/remembrall}/hooks/lib.sh"
    CWD=$(pwd)
@@ -21,12 +21,19 @@ The handoff file is a **single-use baton**. Read it, verify state, restore patch
    TEAM_DIR=$(remembrall_team_handoff_dir "$CWD")
    echo "Personal: $HANDOFF_DIR"
    echo "Team: $TEAM_DIR"
+   echo "Own session: $CLAUDE_SESSION_ID"
+   # Check own session first
+   if [ -n "$CLAUDE_SESSION_ID" ] && [ -f "$HANDOFF_DIR/handoff-${CLAUDE_SESSION_ID}.md" ]; then
+     echo "OWN SESSION HANDOFF: $HANDOFF_DIR/handoff-${CLAUDE_SESSION_ID}.md"
+   fi
+   # List all available
    ls -lt "$HANDOFF_DIR"/handoff-*.md "$TEAM_DIR"/handoff-*.md 2>/dev/null || echo "No handoffs found"
    ```
 
    - **0 files:** Tell the user: "No handoff found. Nothing to replay."
-   - **1 file:** Use it.
-   - **Multiple:** List with timestamps, use the most recent, mention others.
+   - **Own session file found:** Use it directly.
+   - **Only other sessions' files:** List them with timestamps. **Ask the user** which one to replay before consuming — these belong to other Claude instances.
+   - **Multiple including own:** Use own session's handoff, mention others exist.
 
 2. **Read the handoff** — Read the selected file's contents.
 

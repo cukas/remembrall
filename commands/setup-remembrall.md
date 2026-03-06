@@ -9,7 +9,7 @@ Remembrall needs a small bridge in your Claude Code status line to feed context 
 
 ## What the Bridge Does
 
-Your status line already has access to `$remaining` (context window % remaining) and `$cwd` (current working directory). The bridge writes `$remaining` to a file in `/tmp/claude-context-pct/` named after the md5 hash of `$cwd`. Remembrall's hooks read this file to know when to trigger handoffs.
+Your status line already has access to `$remaining` (context window % remaining), `$cwd` (current working directory), and `$session_id`. The bridge writes `$remaining` to a file in `/tmp/claude-context-pct/` named `{md5-of-cwd}-{session_id}`. This ensures multiple Claude instances on the same project each get their own bridge file.
 
 ## Steps
 
@@ -24,15 +24,11 @@ Your status line already has access to `$remaining` (context window % remaining)
 
 4. **Find the insertion point** — Look for the block that checks `if [ -n "$remaining" ]`. The bridge snippet goes inside this block, before the closing `fi`.
 
-5. **Show the user the bridge snippet** they need to add inside their existing `if [ -n "$remaining" ]; then ... fi` block:
+5. **Show the user the bridge snippet** they need to add inside their existing `if [ -n "$remaining" ]; then ... fi` block. The snippet requires `$session_id` to be extracted earlier in the status line (add `session_id=$(echo "$input" | jq -r '.session_id // empty');` alongside the other extractions):
 
 ```bash
 CTX_DIR="/tmp/claude-context-pct"; mkdir -p "$CTX_DIR" 2>/dev/null;
-if command -v md5 >/dev/null 2>&1; then
-  printf "%s" "$remaining" > "$CTX_DIR/$(md5 -qs "$cwd")" 2>/dev/null;
-elif command -v md5sum >/dev/null 2>&1; then
-  printf "%s" "$remaining" > "$CTX_DIR/$(printf '%s' "$cwd" | md5sum | cut -d' ' -f1)" 2>/dev/null;
-fi;
+printf "%s" "$remaining" > "$CTX_DIR/${session_id}" 2>/dev/null;
 ```
 
 6. **Edit the settings file** — Insert the bridge snippet into the status line command. The exact location depends on the user's existing status line format. Find the `if [ -n "$remaining" ]` block and add the bridge snippet inside it (after the existing context display logic, before the `fi`).

@@ -136,15 +136,11 @@ Run `/remembrall-status` to verify.
 
 The self-calibrating estimator is accurate after 1-2 sessions. For immediate precision on the first session, you can optionally run `/setup-remembrall` to install a status-line bridge that writes exact context % to a temp file.
 
-The bridge snippet (added inside your existing `if [ -n "$remaining" ]; then ... fi` block):
+The bridge snippet requires `session_id` to be extracted in your status line (add `session_id=$(echo "$input" | jq -r '.session_id // empty');` alongside your other extractions). Then add this inside your existing `if [ -n "$remaining" ]; then ... fi` block:
 
 ```bash
 CTX_DIR="/tmp/claude-context-pct"; mkdir -p "$CTX_DIR" 2>/dev/null;
-if command -v md5 >/dev/null 2>&1; then
-  printf "%s" "$remaining" > "$CTX_DIR/$(md5 -qs "$cwd")" 2>/dev/null;
-elif command -v md5sum >/dev/null 2>&1; then
-  printf "%s" "$remaining" > "$CTX_DIR/$(printf '%s' "$cwd" | md5sum | cut -d' ' -f1)" 2>/dev/null;
-fi;
+printf "%s" "$remaining" > "$CTX_DIR/${session_id}" 2>/dev/null;
 ```
 
 ## Configuration
