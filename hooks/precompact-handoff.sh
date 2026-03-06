@@ -203,6 +203,8 @@ cat >> "$HANDOFF_FILE" << REMEMBRALL_HEADER
 
 This handoff was auto-generated because the previous session ran out of context.
 Resume the work described below. Check the task list (/tasks) for pending items.
+Do NOT re-analyze files listed below — they are listed for reference only.
+Ask the user what to do next instead of guessing from the file list.
 
 ---
 

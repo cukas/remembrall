@@ -73,6 +73,23 @@ EOF
   exit 0
 fi
 
+# ── Preemptive safety-net handoff ──────────────────────────────────
+# When plan mode is about to trigger, write a handoff BEFORE telling Claude
+# to enter plan mode. If the user clicks "Yes, clear context", PreCompact
+# does NOT fire — so without this, session-resume.sh has nothing to inject.
+# Only runs once per threshold (nudge state prevents re-triggering).
+_create_preemptive_handoff() {
+  [ -z "$CWD" ] || [ -z "$SESSION_ID" ] || [ -z "$TRANSCRIPT_PATH" ] && return
+  [ ! -f "$TRANSCRIPT_PATH" ] && return
+  jq -n \
+    --arg trigger "precompact_auto" \
+    --arg session_id "$SESSION_ID" \
+    --arg cwd "$CWD" \
+    --arg transcript_path "$TRANSCRIPT_PATH" \
+    '{trigger: $trigger, session_id: $session_id, cwd: $cwd, transcript_path: $transcript_path}' | \
+    "$SCRIPT_DIR/precompact-handoff.sh" >/dev/null 2>&1
+}
+
 # ── Detect autonomous mode (ralph loop, swarms, etc.) ──
 # Two triggers: config setting (global) or marker file (per-session from skill)
 IS_AUTONOMOUS=false
@@ -86,7 +103,7 @@ if [ "$IS_AUTONOMOUS" = false ]; then
 fi
 
 # ── Plan content template (shared between warning and urgent) ──
-PLAN_ITEMS="task overview, completed work, remaining tasks (priority-ordered), key decisions, modified files with paths, current git branch, a prescriptive 'Resume With' section (the next session MUST invoke this — e.g. 'invoke /ralph-loop resume iteration N', 'invoke /test-driven-development next test: X', 'dispatch 3 parallel agents for A,B,C', 'invoke /systematic-debugging hypothesis: X', or 'standard sequential'), tools/agents in use (MCP servers, active skills with / prefix so they can be re-invoked, agent-specific state), and any blockers"
+PLAN_ITEMS="task overview, completed work, a 'Next Step — Do This First' section (the EXACT single next action — not a list), remaining tasks after that (priority-ordered), a 'Do NOT Do' section (files to leave alone, approaches ruled out, completed work not to re-analyze), key decisions made and why, modified files with paths (for reference only — not to re-read), current git branch, a prescriptive 'Resume With' section (the next session MUST invoke this — e.g. 'invoke /ralph-loop resume iteration N', 'invoke /test-driven-development next test: X', 'dispatch 3 parallel agents for A,B,C', 'invoke /systematic-debugging hypothesis: X', or 'standard sequential'), tools/agents in use (MCP servers, active skills with / prefix so they can be re-invoked, agent-specific state), and any blockers"
 
 # <=20% — URGENT
 if remembrall_le "$REMAINING" 20; then
@@ -102,9 +119,10 @@ if remembrall_le "$REMAINING" 20; then
 }
 EOF
   else
+    _create_preemptive_handoff
     cat << EOF
 {
-  "additionalContext": "${GAUGE} Context critically low (${REMAINING}% remaining${ESTIMATED}). IMMEDIATELY write a continuation plan and call EnterPlanMode. The plan MUST include:\n- **Task:** what was requested\n- **Completed:** what is done (with file paths)\n- **Remaining:** what still needs to happen (priority-ordered)\n- **Key Decisions:** choices made and why\n- **Files Modified:** list of changed files\n- **Git Branch:** current branch and commit\n- **Resume With:** (PRESCRIPTIVE — the next session MUST invoke this) which methodology to continue with and how to start it. Examples: 'Invoke /ralph-loop and resume iteration N', 'Invoke /test-driven-development — next test to write: [X]', 'Dispatch 3 parallel agents for tasks [A, B, C]', 'Invoke /systematic-debugging — current hypothesis: [X]', 'Standard sequential — just continue the task list'. If agents were running, list their tasks and whether results are pending.\n- **Tools/Agents:** MCP servers in use, active skills invoked this session, any agent-specific config or state that must carry over. List skill names with / prefix so they can be re-invoked.\n- **Blockers/Context:** errors, gotchas, user preferences\n\nOnce in plan mode the user can pick 'Yes, clear context' to get a fresh start with the plan preserved. This is faster and smoother than /handoff + /clear + /replay."
+  "additionalContext": "${GAUGE} Context critically low (${REMAINING}% remaining${ESTIMATED}). IMMEDIATELY do these two steps IN ORDER:\n\n1. Run /handoff to save a structured handoff document. The handoff MUST include:\n- **Task:** what was requested\n- **Completed:** what is done (with file paths)\n- **Next Step — Do This First:** the EXACT single next action (not a vague list — one specific thing)\n- **Remaining:** other tasks after the next step (priority-ordered)\n- **Do NOT Do:** files to leave alone, approaches already tried and ruled out, completed work that must NOT be re-analyzed\n- **Key Decisions:** choices made and why\n- **Files Modified:** for reference only — the next session must NOT re-read these unless needed for the Next Step\n- **Git Branch:** current branch and commit\n- **Resume With:** (PRESCRIPTIVE) which methodology to invoke and how. Examples: 'Invoke /ralph-loop resume iteration N', '/test-driven-development next test: X', '/systematic-debugging hypothesis: X', 'Standard sequential'\n- **Tools/Agents:** MCP servers, active skills (with / prefix), agent-specific state\n- **Blockers/Context:** errors, gotchas, user preferences\n\n2. AFTER the handoff is saved, call EnterPlanMode. The user can then pick 'Yes, clear context' for a fresh start — the handoff will be injected automatically on resume."
 }
 EOF
   fi
@@ -124,9 +142,10 @@ if [ "$IS_AUTONOMOUS" = true ]; then
 }
 EOF
 else
+  _create_preemptive_handoff
   cat << EOF
 {
-  "additionalContext": "${GAUGE} Context getting low (${REMAINING}% remaining${ESTIMATED}). Write a detailed continuation plan capturing: ${PLAN_ITEMS}. Then call EnterPlanMode so the user sees the 'Yes, clear context' option for a fresh start with the plan preserved. This replaces the old /handoff + /clear + /replay workflow — one step instead of three."
+  "additionalContext": "${GAUGE} Context getting low (${REMAINING}% remaining${ESTIMATED}). Do these two steps IN ORDER:\n\n1. Run /handoff to save a structured handoff document capturing: ${PLAN_ITEMS}.\n\n2. AFTER the handoff is saved, call EnterPlanMode so the user sees the 'Yes, clear context' option. The handoff will be injected automatically on resume — no manual /replay needed."
 }
 EOF
 fi

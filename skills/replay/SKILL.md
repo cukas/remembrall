@@ -127,3 +127,6 @@ The handoff file is a **single-use baton**. Read it, verify state, restore patch
 - If the handoff mentions blockers, address those first
 - The handoff may have been written by a different Claude model — don't critique the approach, just continue it
 - If this instance later needs to hand off, use `/handoff` — it will write a fresh one
+- **Do NOT re-read or re-analyze files** just because they appear in a "Files Modified" list — those are for reference only. Only read files needed for the specific Next Step.
+- If a "Do NOT Do" section exists, follow it strictly — it documents dead ends and completed work that must not be revisited
+- If a "Next Step" section exists, that is the ONLY thing to propose — not a re-exploration of the entire task

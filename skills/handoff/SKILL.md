@@ -35,8 +35,14 @@ Create a structured handoff document that any Claude instance can read to resume
    ## Completed
    - [Bullet list of what's done, with file paths]
 
-   ## Remaining
-   - [Numbered list of what still needs to happen, in order]
+   ## Next Step — Do This First
+   [The EXACT next action. Not a list of everything remaining — just the single next thing to do. Be specific: "Run the test suite for auth module" not "continue testing". Include the file path and line number if applicable.]
+
+   ## Remaining (after next step)
+   - [Numbered list of what still needs to happen, in priority order]
+
+   ## Do NOT Do
+   - [Explicit list of things the next session must NOT do — files to leave alone, approaches already tried and ruled out, features that are done and should not be re-analyzed, rabbit holes to avoid]
 
    ## Key Decisions
    - [Important choices made and why — so the next instance doesn't re-debate them]

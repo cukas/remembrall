@@ -104,7 +104,7 @@ cat <<EOF
 {
   "hookSpecificOutput": {
     "hookEventName": "SessionStart",
-    "additionalContext": "SESSION HANDOFF LOADED — Resume the work described below. Summarize to the user what was being worked on, what was completed, and what remains. Ask if they want to continue.\n\n${ESCAPED_CONTENT}${GIT_CONTEXT}${ESCAPED_NOTE}"
+    "additionalContext": "SESSION HANDOFF LOADED — Resume the work described below.\n\nRULES:\n1. Summarize briefly what was being worked on and what the NEXT STEP is.\n2. If a 'Next Step' or 'Remaining' section exists, follow it exactly.\n3. If a 'Do NOT Do' section exists, respect it strictly.\n4. Do NOT re-read or re-analyze files just because they appear in a file list — they are there for reference only.\n5. Ask the user if they want to continue before starting work.\n\n${ESCAPED_CONTENT}${GIT_CONTEXT}${ESCAPED_NOTE}"
   }
 }
 EOF
