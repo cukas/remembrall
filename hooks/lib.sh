@@ -81,36 +81,53 @@ remembrall_validate_number() {
   [[ "$1" =~ ^[0-9]+(\.[0-9]+)?$ ]]
 }
 
-# Estimate context remaining from transcript file size.
+# Estimate context remaining from transcript.
 # Used as a fallback when the status-line bridge is not configured.
 # Returns estimated remaining % on stdout, or exits 1 if no estimate possible.
+#
+# Strategy (in order):
+#   1. Structural JSONL parser — most accurate, parses by message role
+#   2. File-size estimation — simple total_bytes / max_bytes fallback
 #
 # Self-calibrating: after the first compaction, remembrall records the actual
 # transcript size at which context ran out. Subsequent sessions use the
 # calibrated value instead of the default, improving accuracy over time.
-#
-# Uses configurable max_transcript_kb (default: 256) as initial seed.
-# After 1-2 compaction events the calibrated value takes over automatically.
 remembrall_estimate_context() {
   local transcript_path="$1"
   if [ -z "$transcript_path" ] || [ ! -f "$transcript_path" ]; then
     return 1
   fi
 
+  # Try structural estimation first (Phase 2 — more accurate)
+  local structural_result
+  structural_result=$(remembrall_estimate_context_structural "$transcript_path" 2>/dev/null)
+  if [ -n "$structural_result" ]; then
+    echo "$structural_result"
+    return 0
+  fi
+
+  # Fallback: simple file-size estimation
   local size
   size=$(wc -c < "$transcript_path" 2>/dev/null) || return 1
   size=$(echo "$size" | tr -d ' ')
 
-  # Use calibrated max if available, otherwise fall back to config/default
+  # Use calibrated max if available, otherwise model-aware default
   local max_bytes
-  max_bytes=$(remembrall_calibrated_max)
+  max_bytes=$(remembrall_calibrated_max "$transcript_path")
   if [ -z "$max_bytes" ] || [ "$max_bytes" -eq 0 ] 2>/dev/null; then
+    # Check user config override first
     local max_kb
-    max_kb=$(remembrall_config "max_transcript_kb" "256")
-    if ! [[ "$max_kb" =~ ^[0-9]+$ ]]; then
-      max_kb=256
+    max_kb=$(remembrall_config "max_transcript_kb" "")
+    if [ -n "$max_kb" ] && [[ "$max_kb" =~ ^[0-9]+$ ]]; then
+      max_bytes=$((max_kb * 1024))
+    else
+      # Model-aware default: detect model and use per-model max
+      local model_info
+      model_info=$(remembrall_detect_model "$transcript_path")
+      local _m _w _b model_max_kb
+      IFS=$'\t' read -r _m _w _b model_max_kb <<< "$model_info"
+      max_bytes=$((model_max_kb * 1024))
     fi
-    max_bytes=$((max_kb * 1024))
   fi
 
   # Too small to estimate reliably (<40% of expected max)
@@ -130,6 +147,335 @@ remembrall_estimate_context() {
   fi
 
   echo "$remaining"
+}
+
+# ─── Content Bytes Extraction ─────────────────────────────────────
+
+# Single source of truth for extracting content bytes from a transcript.
+# Sums text, tool_use input, thinking, and tool_result content lengths.
+# Skips JSON structural overhead and non-context message types.
+remembrall_extract_content_bytes() {
+  local transcript_path="$1"
+  [ -z "$transcript_path" ] || [ ! -f "$transcript_path" ] && return 1
+  jq -r '
+    [.message.content[]? |
+      if .type == "text" then (.text // "" | length)
+      elif .type == "tool_use" then (.input | tostring | length)
+      elif .type == "thinking" then (.thinking // "" | length)
+      elif .type == "tool_result" then (.content // "" | tostring | length)
+      else 0 end
+    ] | add // 0
+  ' "$transcript_path" 2>/dev/null | awk '{s+=$1} END {printf "%d", s}'
+}
+
+# ─── JSONL Structural Token Estimation ────────────────────────────
+
+# Estimate tokens used from transcript by parsing JSONL structure.
+# Extracts actual content bytes (text, thinking, tool inputs/results) using jq.
+# Skips JSON structural overhead (~79% of context lines) and non-context types.
+#
+# Returns estimated token count on stdout, or exits 1 if no estimate possible.
+# Runs in <50ms on typical transcripts (1-2MB).
+remembrall_estimate_tokens() {
+  local transcript_path="$1"
+  if [ -z "$transcript_path" ] || [ ! -f "$transcript_path" ]; then
+    return 1
+  fi
+
+  local content_bytes
+  content_bytes=$(remembrall_extract_content_bytes "$transcript_path") || return 1
+  [ "$content_bytes" -eq 0 ] 2>/dev/null && return 1
+
+  # Get model-specific bytes/token ratio
+  local model_info bpt_str
+  model_info=$(remembrall_detect_model "$transcript_path")
+  bpt_str=$(printf '%s' "$model_info" | cut -f3)
+
+  # Integer arithmetic: multiply by 10 to handle one decimal place
+  # e.g., 4.2 → 42, then divide result by 10
+  local bpt_int
+  bpt_int=$(printf '%s' "$bpt_str" | sed 's/\.//')
+  [ -z "$bpt_int" ] && bpt_int=40
+
+  local estimated_tokens=$(( (content_bytes * 10) / bpt_int ))
+
+  echo "$estimated_tokens"
+}
+
+# Estimate context remaining % using structural JSONL parsing.
+# More accurate than raw file size because it:
+#   1. Extracts only actual content bytes (text, thinking, tool I/O)
+#   2. Skips JSON wrapper fields (~79% of each line) and non-context types
+#   3. Compares against calibrated content max (learned from compaction events)
+#
+# Content max varies by user setup (plugins, tools, CLAUDE.md size all affect
+# overhead). Calibration learns the right value within 1-2 compaction events.
+# Before calibration, uses conservative per-model defaults.
+remembrall_estimate_context_structural() {
+  local transcript_path="$1"
+  if [ -z "$transcript_path" ] || [ ! -f "$transcript_path" ]; then
+    return 1
+  fi
+
+  local content_bytes
+  content_bytes=$(remembrall_extract_content_bytes "$transcript_path") || return 1
+  [ "$content_bytes" -eq 0 ] 2>/dev/null && return 1
+
+  # Detect model (needed for both content_max defaults and correction)
+  local model_info model_name
+  model_info=$(remembrall_detect_model "$transcript_path")
+  model_name=$(printf '%s' "$model_info" | cut -f1)
+
+  # Get content max: calibrated per-model value, or default
+  local content_max
+  content_max=$(remembrall_calibrated_content_max "$transcript_path")
+  if [ -z "$content_max" ] || [ "$content_max" -eq 0 ] 2>/dev/null; then
+    # Content max varies hugely by user setup (plugins, tools, CLAUDE.md).
+    # These defaults are a compromise — calibration replaces them quickly.
+    case "$model_name" in
+      claude-opus-4-6*|claude-opus-4*)   content_max=358400 ;;  # ~350KB
+      claude-sonnet-4-6*|claude-sonnet-4*) content_max=337920 ;; # ~330KB
+      claude-haiku-4-5*|claude-haiku-4*)  content_max=317440 ;;  # ~310KB
+      *)                                   content_max=337920 ;;  # ~330KB
+    esac
+  fi
+
+  # Too early to estimate reliably (<30% of content max used)
+  if [ "$content_bytes" -lt $((content_max * 30 / 100)) ]; then
+    return 1
+  fi
+
+  local used_pct=$((content_bytes * 100 / content_max))
+  if [ "$used_pct" -gt 100 ]; then
+    used_pct=100
+  fi
+  local remaining=$((100 - used_pct))
+
+  # Floor at 5%
+  if [ "$remaining" -lt 5 ]; then
+    remaining=5
+  fi
+
+  # Apply correction from calibration pairs if available (Phase 5)
+  if [ -n "$model_name" ] && [ "$model_name" != "unknown" ]; then
+    remaining=$(remembrall_apply_correction "$remaining" "$model_name")
+  fi
+
+  echo "$remaining"
+}
+
+# Get calibrated content max (content bytes at compaction) for structural estimation.
+# Priority: bridge-derived per-model → compaction-based per-model → compaction-based global.
+# Bridge-derived is most accurate because it calibrates per-user overhead automatically.
+# Returns empty if no calibration data exists (falls through to hardcoded defaults).
+remembrall_calibrated_content_max() {
+  local transcript_path="${1:-}"
+  local cal_file="$HOME/.remembrall/calibration.json"
+  [ -f "$cal_file" ] || return 0
+
+  local avg=""
+
+  if [ -n "$transcript_path" ] && [ -f "$transcript_path" ]; then
+    local model_info model_name
+    model_info=$(remembrall_detect_model "$transcript_path")
+    model_name=$(printf '%s' "$model_info" | cut -f1)
+    if [ -n "$model_name" ] && [ "$model_name" != "unknown" ]; then
+      # 1. Bridge-derived content_max (best: auto-calibrated per user+model)
+      avg=$(jq -r --arg m "$model_name" '
+        if ((.models[$m].derived_content_max // []) | length) > 0 then
+          ((.models[$m].derived_content_max | add) / (.models[$m].derived_content_max | length)) | floor
+        else
+          empty
+        end
+      ' "$cal_file" 2>/dev/null)
+
+      # 2. Compaction-based content_samples (good: real compaction data)
+      if [ -z "$avg" ]; then
+        avg=$(jq -r --arg m "$model_name" '
+          if ((.models[$m].content_samples // []) | length) > 0 then
+            ((.models[$m].content_samples | add) / (.models[$m].content_samples | length)) | floor
+          else
+            empty
+          end
+        ' "$cal_file" 2>/dev/null)
+      fi
+    fi
+  fi
+
+  # 3. Global content samples (fallback)
+  if [ -z "$avg" ]; then
+    avg=$(jq -r '
+      if ((.content_samples // []) | length) > 0 then
+        ((.content_samples | add) / (.content_samples | length)) | floor
+      else
+        empty
+      end
+    ' "$cal_file" 2>/dev/null)
+  fi
+
+  echo "$avg"
+}
+
+# ─── Bridge-Derived Content Max ───────────────────────────────────
+
+# Derive content_max from bridge truth and store for future estimation.
+# When bridge is active: content_max = content_bytes / (used_pct / 100).
+# This auto-calibrates per user — no hardcoded defaults needed after first bridge session.
+# Requires ≥20% usage for stable measurement (small numbers = high noise).
+# Stores rolling last 5 per model in calibration.json.
+remembrall_store_derived_content_max() {
+  local content_bytes="$1"
+  local bridge_remaining="$2"
+  local model_name="$3"
+
+  [ -z "$content_bytes" ] || [ "$content_bytes" -le 0 ] 2>/dev/null && return
+  [ -z "$bridge_remaining" ] && return
+  [ -z "$model_name" ] || [ "$model_name" = "unknown" ] && return
+
+  # Need ≥20% used for stable derivation (avoid noise at session start)
+  local used_pct=$((100 - bridge_remaining))
+  [ "$used_pct" -lt 20 ] 2>/dev/null && return
+
+  # Derive: content_max = content_bytes / (used_pct / 100)
+  local derived=$(( content_bytes * 100 / used_pct ))
+  [ "$derived" -le 0 ] 2>/dev/null && return
+
+  local cal_file="$HOME/.remembrall/calibration.json"
+  mkdir -p "$HOME/.remembrall"
+  [ ! -f "$cal_file" ] && echo '{"samples":[],"models":{}}' > "$cal_file"
+
+  local tmp
+  tmp=$(mktemp "${cal_file}.XXXXXX")
+  jq --argjson d "$derived" --arg m "$model_name" '
+    .models //= {} |
+    .models[$m] //= {} |
+    .models[$m].derived_content_max = ((.models[$m].derived_content_max // []) + [$d])[-5:]
+  ' "$cal_file" > "$tmp" 2>/dev/null && mv "$tmp" "$cal_file" || rm -f "$tmp"
+}
+
+# ─── Bridge-Paired Calibration ────────────────────────────────────
+
+# Log a calibration pair when both bridge and structural estimates are available.
+# Stores {content_bytes, bridge_pct, structural_pct, model, msg_count, timestamp}
+# in calibration.json under .pairs[]. Keeps last 20 pairs per model.
+remembrall_log_calibration_pair() {
+  local transcript_path="$1"
+  local bridge_pct="$2"
+  local structural_pct="$3"
+
+  if [ -z "$transcript_path" ] || [ ! -f "$transcript_path" ]; then
+    return 1
+  fi
+
+  local content_bytes
+  content_bytes=$(remembrall_extract_content_bytes "$transcript_path" 2>/dev/null)
+  [ -z "$content_bytes" ] && content_bytes=0
+
+  # Get model and message count
+  local model_info model_name
+  model_info=$(remembrall_detect_model "$transcript_path")
+  model_name=$(printf '%s' "$model_info" | cut -f1)
+
+  local msg_count
+  msg_count=$(wc -l < "$transcript_path" 2>/dev/null | tr -d ' ')
+  [ -z "$msg_count" ] && msg_count=0
+
+  local cal_file="$HOME/.remembrall/calibration.json"
+  mkdir -p "$HOME/.remembrall"
+
+  if [ ! -f "$cal_file" ]; then
+    echo '{"samples":[],"models":{},"pairs":{}}' > "$cal_file"
+  fi
+
+  local timestamp
+  timestamp=$(date +%s)
+
+  local tmp
+  tmp=$(mktemp "${cal_file}.XXXXXX")
+  jq --argjson cb "$content_bytes" \
+     --argjson bp "$bridge_pct" \
+     --argjson sp "$structural_pct" \
+     --arg m "$model_name" \
+     --argjson mc "$msg_count" \
+     --argjson ts "$timestamp" '
+    .pairs //= {} |
+    .pairs[$m] //= [] |
+    .pairs[$m] += [{
+      content_bytes: $cb,
+      bridge_pct: $bp,
+      structural_pct: $sp,
+      model: $m,
+      msg_count: $mc,
+      timestamp: $ts
+    }] |
+    .pairs[$m] = .pairs[$m][-20:]
+  ' "$cal_file" > "$tmp" 2>/dev/null && mv "$tmp" "$cal_file" || rm -f "$tmp"
+}
+
+# Compute correction offset from calibration pairs for a model.
+# Returns the weighted average of (bridge_pct - structural_pct).
+# Newer pairs weighted 2x vs older. Returns empty if <5 pairs.
+remembrall_correction_offset() {
+  local model_name="$1"
+  local cal_file="$HOME/.remembrall/calibration.json"
+  [ -f "$cal_file" ] || return 0
+
+  local offset
+  offset=$(jq -r --arg m "$model_name" '
+    if (.pairs[$m] | length) >= 5 then
+      (.pairs[$m] | length) as $len |
+      (.pairs[$m] | to_entries |
+        map(
+          (.value.bridge_pct - .value.structural_pct) *
+          (if .key >= ($len - ($len / 2 | floor)) then 2 else 1 end)
+        ) | add) as $weighted_sum |
+      (.pairs[$m] | to_entries |
+        map(if .key >= ($len - ($len / 2 | floor)) then 2 else 1 end) | add
+      ) as $weight_total |
+      ($weighted_sum / $weight_total) | round
+    else
+      empty
+    end
+  ' "$cal_file" 2>/dev/null)
+
+  echo "$offset"
+}
+
+# ─── Self-Correcting Feedback Loop ────────────────────────────────
+
+# Apply correction offset to a structural estimate.
+# Uses weighted moving average from calibration pairs.
+# Caps correction at ±15% to prevent runaway corrections.
+# Returns corrected % on stdout, or the original if no correction available.
+remembrall_apply_correction() {
+  local structural_pct="$1"
+  local model_name="$2"
+
+  local offset
+  offset=$(remembrall_correction_offset "$model_name")
+  if [ -z "$offset" ]; then
+    echo "$structural_pct"
+    return
+  fi
+
+  # Cap at ±15%
+  if [ "$offset" -gt 15 ] 2>/dev/null; then
+    offset=15
+  elif [ "$offset" -lt -15 ] 2>/dev/null; then
+    offset=-15
+  fi
+
+  local corrected=$((structural_pct + offset))
+
+  # Clamp to 5-100
+  if [ "$corrected" -gt 100 ]; then
+    corrected=100
+  elif [ "$corrected" -lt 5 ]; then
+    corrected=5
+  fi
+
+  echo "remembrall: correction applied: ${offset}% offset for ${model_name} (${structural_pct}% → ${corrected}%)" >&2
+  echo "$corrected"
 }
 
 # ─── Calibration ──────────────────────────────────────────────────
@@ -156,38 +502,224 @@ remembrall_calibrate() {
   mkdir -p "$HOME/.remembrall"
 
   if [ ! -f "$cal_file" ]; then
-    echo '{"samples":[]}' > "$cal_file"
+    echo '{"samples":[],"models":{}}' > "$cal_file"
   fi
 
-  # Append sample (keep last 5)
+  # Detect model for per-model calibration
+  local model_info model_name
+  model_info=$(remembrall_detect_model "$transcript_path")
+  model_name=$(printf '%s' "$model_info" | cut -f1)
+
+  local content_bytes
+  content_bytes=$(remembrall_extract_content_bytes "$transcript_path" 2>/dev/null)
+  [ -z "$content_bytes" ] && content_bytes=0
+
+  # Append samples to global + per-model arrays (keep last 5 each)
   local tmp
   tmp=$(mktemp "${cal_file}.XXXXXX")
-  jq --argjson s "$size" '
+  jq --argjson s "$size" --argjson cb "$content_bytes" --arg m "$model_name" '
     .samples += [$s] |
     .samples = .samples[-5:] |
+    (if $cb > 0 then .content_samples = ((.content_samples // []) + [$cb])[-5:] else . end) |
+    .models //= {} |
+    .models[$m] //= {"samples":[],"content_samples":[]} |
+    .models[$m].samples += [$s] |
+    .models[$m].samples = .models[$m].samples[-5:] |
+    (if $cb > 0 then .models[$m].content_samples = ((.models[$m].content_samples // []) + [$cb])[-5:] else . end) |
     .updated = now
   ' "$cal_file" > "$tmp" 2>/dev/null && mv "$tmp" "$cal_file" || rm -f "$tmp"
 }
 
 # Get calibrated max transcript size in bytes (average of stored samples).
+# Checks per-model calibration first (Phase 3), falls back to global samples.
 # Returns empty string if no calibration data exists.
 remembrall_calibrated_max() {
+  local transcript_path="${1:-}"
   local cal_file="$HOME/.remembrall/calibration.json"
   if [ ! -f "$cal_file" ]; then
     echo ""
     return
   fi
 
-  local avg
-  avg=$(jq -r '
-    if (.samples | length) > 0 then
-      ((.samples | add) / (.samples | length)) | floor
-    else
-      empty
-    end
-  ' "$cal_file" 2>/dev/null)
+  local avg=""
+
+  # Try per-model calibration first (Phase 3+)
+  if [ -n "$transcript_path" ] && [ -f "$transcript_path" ]; then
+    local model_info model_name
+    model_info=$(remembrall_detect_model "$transcript_path")
+    model_name=$(printf '%s' "$model_info" | cut -f1)
+    if [ -n "$model_name" ] && [ "$model_name" != "unknown" ]; then
+      avg=$(jq -r --arg m "$model_name" '
+        if (.models[$m].samples | length) > 0 then
+          ((.models[$m].samples | add) / (.models[$m].samples | length)) | floor
+        else
+          empty
+        end
+      ' "$cal_file" 2>/dev/null)
+    fi
+  fi
+
+  # Fallback to global samples
+  if [ -z "$avg" ]; then
+    avg=$(jq -r '
+      if (.samples | length) > 0 then
+        ((.samples | add) / (.samples | length)) | floor
+      else
+        empty
+      end
+    ' "$cal_file" 2>/dev/null)
+  fi
 
   echo "$avg"
+}
+
+# ─── Model Detection ──────────────────────────────────────────────
+
+# Detect model from transcript JSONL. Returns tab-separated:
+#   model_name  window_tokens  bytes_per_token  max_transcript_kb
+#
+# Parses the first assistant message for .message.model.
+# Falls back to "unknown" with safe defaults.
+#
+# max_transcript_kb is the expected total JSONL file size at compaction.
+# Calibration data overrides this when available (Phase 5).
+remembrall_detect_model() {
+  local transcript_path="$1"
+  local model="unknown"
+
+  if [ -n "$transcript_path" ] && [ -f "$transcript_path" ]; then
+    model=$(head -100 "$transcript_path" 2>/dev/null | \
+      jq -r 'select(.type == "assistant" and .message.model != null) | .message.model' 2>/dev/null | \
+      head -1)
+    [ -z "$model" ] && model="unknown"
+  fi
+
+  # Lookup table: model → window_tokens, bytes_per_token, max_transcript_kb
+  # max_transcript_kb = estimated total JSONL size at compaction
+  # Based on observed data: Opus transcripts compact at ~1675KB
+  local window=200000
+  local bpt="4.2"
+  local max_kb=1600
+  case "$model" in
+    claude-opus-4-6*|claude-opus-4*)
+      window=200000; bpt="4.2"; max_kb=1700 ;;
+    claude-sonnet-4-6*|claude-sonnet-4*)
+      window=200000; bpt="4.0"; max_kb=1600 ;;
+    claude-haiku-4-5*|claude-haiku-4*)
+      window=200000; bpt="3.8"; max_kb=1500 ;;
+    *)
+      window=200000; bpt="4.0"; max_kb=1600 ;;
+  esac
+
+  printf '%s\t%d\t%s\t%d\n' "$model" "$window" "$bpt" "$max_kb"
+}
+
+# Parse model detection output into individual variables.
+# Usage: eval "$(remembrall_parse_model_info "$transcript_path")"
+# Sets: REMEMBRALL_MODEL, REMEMBRALL_WINDOW, REMEMBRALL_BPT, REMEMBRALL_MAX_KB
+remembrall_parse_model_info() {
+  local transcript_path="$1"
+  local info
+  info=$(remembrall_detect_model "$transcript_path")
+  local m w b k
+  IFS=$'\t' read -r m w b k <<< "$info"
+  printf 'REMEMBRALL_MODEL=%q REMEMBRALL_WINDOW=%q REMEMBRALL_BPT=%q REMEMBRALL_MAX_KB=%q' \
+    "$m" "$w" "$b" "$k"
+}
+
+# ─── Growth Tracking ──────────────────────────────────────────────
+
+# Track content growth per prompt for a session.
+# Appends content_bytes to /tmp/remembrall-growth/$SESSION_ID (last 10).
+# Returns tab-separated: avg_growth_per_prompt  is_volatile
+# is_volatile=1 if last 3 growths > 2x average.
+remembrall_track_growth() {
+  local session_id="$1"
+  local transcript_path="$2"
+  [ -z "$session_id" ] || [ -z "$transcript_path" ] || [ ! -f "$transcript_path" ] && return 1
+
+  local content_bytes
+  content_bytes=$(remembrall_extract_content_bytes "$transcript_path") || return 1
+  [ "$content_bytes" -eq 0 ] 2>/dev/null && return 1
+
+  local growth_dir="/tmp/remembrall-growth"
+  mkdir -p "$growth_dir" 2>/dev/null
+  local growth_file="$growth_dir/$session_id"
+
+  # Append current measurement
+  echo "$content_bytes" >> "$growth_file"
+
+  # Keep last 10 measurements
+  local line_count
+  line_count=$(wc -l < "$growth_file" | tr -d ' ')
+  if [ "$line_count" -gt 10 ]; then
+    local tmp
+    tmp=$(tail -10 "$growth_file")
+    printf '%s\n' "$tmp" > "$growth_file"
+  fi
+
+  # Need at least 2 measurements for deltas
+  line_count=$(wc -l < "$growth_file" | tr -d ' ')
+  if [ "$line_count" -lt 2 ]; then
+    printf '0\t0\n'
+    return 0
+  fi
+
+  # Calculate deltas and average growth
+  local prev="" total_delta=0 delta_count=0 last_3_deltas=""
+  while IFS= read -r val; do
+    if [ -n "$prev" ]; then
+      local delta=$((val - prev))
+      [ "$delta" -lt 0 ] && delta=0
+      total_delta=$((total_delta + delta))
+      delta_count=$((delta_count + 1))
+      last_3_deltas="$last_3_deltas $delta"
+    fi
+    prev="$val"
+  done < "$growth_file"
+
+  local avg_growth=0
+  if [ "$delta_count" -gt 0 ]; then
+    avg_growth=$((total_delta / delta_count))
+  fi
+
+  # Check volatility: last 3 deltas > 2x average
+  local is_volatile=0
+  if [ "$delta_count" -ge 3 ] && [ "$avg_growth" -gt 0 ]; then
+    local volatile_count=0
+    local threshold=$((avg_growth * 2))
+    # Get last 3 deltas
+    local last3
+    last3=$(printf '%s\n' $last_3_deltas | tail -3)
+    while IFS= read -r d; do
+      [ "$d" -gt "$threshold" ] 2>/dev/null && volatile_count=$((volatile_count + 1))
+    done <<< "$last3"
+    [ "$volatile_count" -ge 3 ] && is_volatile=1
+  fi
+
+  printf '%d\t%d\n' "$avg_growth" "$is_volatile"
+}
+
+# Estimate prompts remaining until a threshold % is reached.
+# Usage: remembrall_prompts_until_threshold content_bytes avg_growth content_max threshold_pct
+# Returns estimated prompt count, or empty if not enough data.
+remembrall_prompts_until_threshold() {
+  local content_bytes="$1"
+  local avg_growth="$2"
+  local content_max="$3"
+  local threshold_pct="${4:-20}"
+
+  [ -z "$avg_growth" ] || [ "$avg_growth" -le 0 ] 2>/dev/null && return 1
+  [ -z "$content_max" ] || [ "$content_max" -le 0 ] 2>/dev/null && return 1
+  [ -z "$content_bytes" ] && return 1
+
+  # Bytes at threshold
+  local threshold_bytes=$(( content_max * (100 - threshold_pct) / 100 ))
+  local bytes_remaining=$((threshold_bytes - content_bytes))
+  [ "$bytes_remaining" -le 0 ] && { echo "0"; return 0; }
+
+  local prompts=$((bytes_remaining / avg_growth))
+  echo "$prompts"
 }
 
 # ─── Context Gauge ────────────────────────────────────────────────

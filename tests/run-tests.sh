@@ -240,6 +240,9 @@ assert_eq "empty > 60 = false" "false" "$R"
 echo ""
 echo "remembrall_estimate_context:"
 
+# Set explicit max_transcript_kb for testing (model detection returns 1600 for non-JSONL files)
+remembrall_config_set "max_transcript_kb" "256"
+
 # No file
 R=$(remembrall_estimate_context "" 2>/dev/null) && STATUS=0 || STATUS=1
 assert_eq "empty path returns error" "1" "$STATUS"
@@ -293,6 +296,7 @@ R=$(remembrall_calibrated_max)
 assert_match "calibrated max shifts with 2nd sample" '^2[0-9][0-9][0-9][0-9][0-9]$' "$R"
 
 # Calibration with estimation — calibrated value should be used
+rm -f "$HOME/.remembrall/config.json"  # clear max_transcript_kb override so calibration is used
 R=$(remembrall_estimate_context "$MED_FILE")
 # With calibrated max ~225KB, 153KB is ~68% used → ~32% remaining
 assert_match "calibrated estimation uses learned max" '^(2[0-9]|3[0-9]|4[0-9])$' "$R"
@@ -757,6 +761,412 @@ echo '{"retention_hours": "abc"}' > "$HOME/.remembrall/config.json"
 VAL=$(remembrall_retention_hours)
 assert_eq "invalid retention falls back to 72" "72" "$VAL"
 rm -f "$HOME/.remembrall/config.json"
+
+
+# ═══════════════════════════════════════════════════════════════════
+echo ""
+echo "v2.3.0 Context Estimation tests"
+echo "════════════════════════════════"
+
+# ── remembrall_detect_model ───────────────────────────────────────
+echo ""
+echo "remembrall_detect_model:"
+
+# Create a test transcript with a known model
+MODEL_TRANSCRIPT="$TMPDIR_ROOT/model_transcript.jsonl"
+echo '{"type":"assistant","message":{"model":"claude-opus-4-6-20260301","content":[{"type":"text","text":"hello"}]}}' > "$MODEL_TRANSCRIPT"
+
+R=$(remembrall_detect_model "$MODEL_TRANSCRIPT")
+MODEL_NAME=$(printf '%s' "$R" | cut -f1)
+assert_eq "detects opus model" "claude-opus-4-6-20260301" "$MODEL_NAME"
+
+WINDOW=$(printf '%s' "$R" | cut -f2)
+assert_eq "opus window is 200000" "200000" "$WINDOW"
+
+MAX_KB=$(printf '%s' "$R" | cut -f4)
+assert_eq "opus max_kb is 1700" "1700" "$MAX_KB"
+
+# Unknown model
+UNKNOWN_TRANSCRIPT="$TMPDIR_ROOT/unknown_transcript.jsonl"
+echo '{"type":"user","message":{"content":[{"type":"text","text":"hi"}]}}' > "$UNKNOWN_TRANSCRIPT"
+
+R=$(remembrall_detect_model "$UNKNOWN_TRANSCRIPT")
+MODEL_NAME=$(printf '%s' "$R" | cut -f1)
+assert_eq "unknown model defaults" "unknown" "$MODEL_NAME"
+
+# Missing transcript
+R=$(remembrall_detect_model "/nonexistent/path" 2>/dev/null)
+MODEL_NAME=$(printf '%s' "$R" | cut -f1)
+assert_eq "missing transcript returns unknown" "unknown" "$MODEL_NAME"
+
+# ── remembrall_estimate_tokens ────────────────────────────────────
+echo ""
+echo "remembrall_estimate_tokens:"
+
+# Create a transcript with real content
+TOKEN_TRANSCRIPT="$TMPDIR_ROOT/token_transcript.jsonl"
+for i in $(seq 1 50); do
+  echo '{"type":"assistant","message":{"model":"claude-opus-4-6","content":[{"type":"text","text":"'"$(printf '%0200d' 0)"'"}]}}' >> "$TOKEN_TRANSCRIPT"
+done
+
+R=$(remembrall_estimate_tokens "$TOKEN_TRANSCRIPT" 2>/dev/null)
+if [ -n "$R" ] && [ "$R" -gt 0 ] 2>/dev/null; then
+  printf "${GREEN}  PASS${RESET} returns >0 for valid JSONL\n"
+  PASS=$((PASS + 1))
+else
+  printf "${RED}  FAIL${RESET} returns >0 for valid JSONL (got: %s)\n" "$R"
+  FAIL=$((FAIL + 1))
+fi
+
+# Empty file
+EMPTY_TRANSCRIPT="$TMPDIR_ROOT/empty_transcript.jsonl"
+touch "$EMPTY_TRANSCRIPT"
+R=$(remembrall_estimate_tokens "$EMPTY_TRANSCRIPT" 2>/dev/null) && STATUS=0 || STATUS=1
+assert_eq "empty file returns error" "1" "$STATUS"
+
+# ── remembrall_estimate_context_structural ────────────────────────
+echo ""
+echo "remembrall_estimate_context_structural:"
+
+# Build a transcript large enough (>30% of default content_max ~330KB = ~100KB content)
+STRUCTURAL_TRANSCRIPT="$TMPDIR_ROOT/structural_transcript.jsonl"
+LONG_TEXT=$(printf '%0500d' 0)
+for i in $(seq 1 300); do
+  echo '{"type":"assistant","message":{"model":"claude-sonnet-4-6","content":[{"type":"text","text":"'"$LONG_TEXT"'"}]}}' >> "$STRUCTURAL_TRANSCRIPT"
+done
+
+R=$(remembrall_estimate_context_structural "$STRUCTURAL_TRANSCRIPT" 2>/dev/null)
+if [ -n "$R" ] && [ "$R" -gt 0 ] && [ "$R" -le 100 ] 2>/dev/null; then
+  printf "${GREEN}  PASS${RESET} returns valid %% for large content (%s%%)\n" "$R"
+  PASS=$((PASS + 1))
+else
+  printf "${RED}  FAIL${RESET} returns valid %% for large content (got: %s)\n" "$R"
+  FAIL=$((FAIL + 1))
+fi
+
+# Small content — should return error (below 30% threshold)
+SMALL_STRUCTURAL="$TMPDIR_ROOT/small_structural.jsonl"
+echo '{"type":"assistant","message":{"model":"claude-sonnet-4-6","content":[{"type":"text","text":"tiny"}]}}' > "$SMALL_STRUCTURAL"
+R=$(remembrall_estimate_context_structural "$SMALL_STRUCTURAL" 2>/dev/null) && STATUS=0 || STATUS=1
+assert_eq "small content returns error" "1" "$STATUS"
+
+# ── remembrall_calibrated_content_max ─────────────────────────────
+echo ""
+echo "remembrall_calibrated_content_max:"
+
+rm -f "$HOME/.remembrall/calibration.json"
+
+# No data
+R=$(remembrall_calibrated_content_max "" 2>/dev/null)
+assert_eq "no calibration data returns empty" "" "$R"
+
+# Add content samples via calibrate
+CAL_STRUCTURAL="$TMPDIR_ROOT/cal_structural.jsonl"
+LONG_TEXT2=$(printf '%0500d' 0)
+for i in $(seq 1 400); do
+  echo '{"type":"assistant","message":{"model":"claude-opus-4-6","content":[{"type":"text","text":"'"$LONG_TEXT2"'"}]}}' >> "$CAL_STRUCTURAL"
+done
+remembrall_calibrate "$CAL_STRUCTURAL" 2>/dev/null
+
+R=$(remembrall_calibrated_content_max "$CAL_STRUCTURAL" 2>/dev/null)
+if [ -n "$R" ] && [ "$R" -gt 0 ] 2>/dev/null; then
+  printf "${GREEN}  PASS${RESET} returns avg after calibration samples (%s)\n" "$R"
+  PASS=$((PASS + 1))
+else
+  printf "${RED}  FAIL${RESET} returns avg after calibration samples (got: %s)\n" "$R"
+  FAIL=$((FAIL + 1))
+fi
+
+rm -f "$HOME/.remembrall/calibration.json"
+
+# ── Bridge-derived content_max ────────────────────────────────────
+echo ""
+echo "remembrall_store_derived_content_max:"
+
+rm -f "$HOME/.remembrall/calibration.json"
+
+# Should not store when usage < 20%
+remembrall_store_derived_content_max 50000 90 "claude-opus-4-6" 2>/dev/null
+if [ -f "$HOME/.remembrall/calibration.json" ]; then
+  R=$(jq -r '.models["claude-opus-4-6"].derived_content_max // empty' "$HOME/.remembrall/calibration.json" 2>/dev/null) || R=""
+else
+  R=""
+fi
+assert_eq "skips when usage < 20% (90% remaining)" "" "$R"
+
+# Should store when usage >= 20% (remaining=80%, used=20%)
+remembrall_store_derived_content_max 70000 80 "claude-opus-4-6" 2>/dev/null
+R=$(jq -r '.models["claude-opus-4-6"].derived_content_max[0]' "$HOME/.remembrall/calibration.json" 2>/dev/null) || R=""
+# 70000 * 100 / 20 = 350000
+assert_eq "derives content_max at 20% usage" "350000" "$R"
+
+# Should store at 40% usage (remaining=60%)
+remembrall_store_derived_content_max 140000 60 "claude-opus-4-6" 2>/dev/null
+R=$(jq -r '.models["claude-opus-4-6"].derived_content_max | length' "$HOME/.remembrall/calibration.json" 2>/dev/null) || R=""
+assert_eq "accumulates multiple samples" "2" "$R"
+R=$(jq -r '.models["claude-opus-4-6"].derived_content_max[1]' "$HOME/.remembrall/calibration.json" 2>/dev/null) || R=""
+# 140000 * 100 / 40 = 350000
+assert_eq "derives content_max at 40% usage" "350000" "$R"
+
+# Should keep only last 5
+for i in 1 2 3 4 5; do
+  remembrall_store_derived_content_max 175000 50 "claude-opus-4-6" 2>/dev/null
+done
+R=$(jq -r '.models["claude-opus-4-6"].derived_content_max | length' "$HOME/.remembrall/calibration.json" 2>/dev/null) || R=""
+assert_eq "caps at 5 samples" "5" "$R"
+
+# Should not store for unknown model
+remembrall_store_derived_content_max 100000 60 "unknown" 2>/dev/null
+R=$(jq -r '.models["unknown"].derived_content_max // empty' "$HOME/.remembrall/calibration.json" 2>/dev/null) || R=""
+assert_eq "skips unknown model" "" "$R"
+
+# calibrated_content_max should prefer derived over hardcoded defaults
+rm -f "$HOME/.remembrall/calibration.json"
+remembrall_store_derived_content_max 100000 60 "claude-opus-4-6" 2>/dev/null
+# derived: 100000 * 100 / 40 = 250000
+R=$(remembrall_calibrated_content_max "$CAL_STRUCTURAL" 2>/dev/null)
+assert_eq "calibrated_content_max uses derived value" "250000" "$R"
+
+rm -f "$HOME/.remembrall/calibration.json"
+
+# ── Bridge auto-inject in session-resume.sh ───────────────────────
+echo ""
+echo "Bridge auto-inject (session-resume.sh):"
+
+# Create settings.json without bridge but with statusLine (includes session_id extraction)
+SETTINGS_FILE="$HOME/.claude/settings.json"
+mkdir -p "$HOME/.claude"
+printf '%s\n' '{
+  "statusLine": {
+    "command": "input=$(cat); session_id=$(echo \"$input\" | jq -r '"'"'.session_id // empty'"'"'); remaining=$(echo \"$input\" | jq -r '"'"'.context_remaining // empty'"'"'); status=\"ctx: ${remaining}%\"; echo \"$status\""
+  }
+}' > "$SETTINGS_FILE"
+
+# Run session-resume — should inject bridge
+TEST_CWD_BR="$TMPDIR_ROOT/bridge-test-cwd"
+mkdir -p "$TEST_CWD_BR"
+echo '{"source":"fresh","session_id":"test-bridge-inject","cwd":"'"$TEST_CWD_BR"'"}' | bash "$PLUGIN_ROOT/hooks/session-resume.sh" 2>/dev/null
+
+if grep -q "claude-context-pct" "$SETTINGS_FILE" 2>/dev/null; then
+  printf "${GREEN}  PASS${RESET} bridge injected when missing\n"
+  PASS=$((PASS + 1))
+else
+  printf "${RED}  FAIL${RESET} bridge injected when missing\n"
+  FAIL=$((FAIL + 1))
+fi
+
+# Run again — should not duplicate
+BEFORE=$(grep -c "claude-context-pct" "$SETTINGS_FILE" 2>/dev/null)
+echo '{"source":"fresh","session_id":"test-bridge-inject2","cwd":"'"$TEST_CWD_BR"'"}' | bash "$PLUGIN_ROOT/hooks/session-resume.sh" 2>/dev/null
+AFTER=$(grep -c "claude-context-pct" "$SETTINGS_FILE" 2>/dev/null)
+assert_eq "bridge not duplicated on re-run" "$BEFORE" "$AFTER"
+
+rm -rf "$TEST_CWD_BR"
+rm -f "$SETTINGS_FILE"
+
+# Test: create bridge from scratch when no statusLine exists
+printf '%s\n' '{"env":{"allowAll":true}}' > "$SETTINGS_FILE"
+TEST_CWD_BR2="$TMPDIR_ROOT/bridge-test-cwd2"
+mkdir -p "$TEST_CWD_BR2"
+echo '{"source":"fresh","session_id":"test-bridge-create","cwd":"'"$TEST_CWD_BR2"'"}' | bash "$PLUGIN_ROOT/hooks/session-resume.sh" 2>/dev/null
+if grep -q "claude-context-pct" "$SETTINGS_FILE" 2>/dev/null; then
+  printf "${GREEN}  PASS${RESET} bridge created from scratch (no statusLine)\n"
+  PASS=$((PASS + 1))
+else
+  printf "${RED}  FAIL${RESET} bridge created from scratch (no statusLine)\n"
+  FAIL=$((FAIL + 1))
+fi
+
+# Verify the created command is valid — should contain ctx:
+if grep -q 'ctx:' "$SETTINGS_FILE" 2>/dev/null; then
+  printf "${GREEN}  PASS${RESET} created status line shows context %%\n"
+  PASS=$((PASS + 1))
+else
+  printf "${RED}  FAIL${RESET} created status line shows context %%\n"
+  FAIL=$((FAIL + 1))
+fi
+
+rm -rf "$TEST_CWD_BR2"
+rm -f "$SETTINGS_FILE"
+
+# ── Bootstrap in context-monitor.sh ───────────────────────────────
+echo ""
+echo "Bootstrap (context-monitor.sh):"
+
+# No bridge, no settings bridge — first call should bootstrap
+TEST_CWD_BS="$TMPDIR_ROOT/bootstrap-test-cwd"
+mkdir -p "$TEST_CWD_BS"
+rm -f "/tmp/remembrall-bootstrap/test-bootstrap-sess"
+rm -f "/tmp/claude-context-pct/test-bootstrap-sess"
+# No settings.json with bridge
+rm -f "$HOME/.claude/settings.json"
+
+OUTPUT=$(echo '{"session_id":"test-bootstrap-sess","cwd":"'"$TEST_CWD_BS"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
+assert_match "bootstrap fires: requests bridge write" "claude-context-pct" "$OUTPUT"
+
+# Second call — should NOT bootstrap again
+OUTPUT=$(echo '{"session_id":"test-bootstrap-sess","cwd":"'"$TEST_CWD_BS"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
+# Should be empty or estimation-based — not bootstrap
+if echo "$OUTPUT" | grep -q "Write your context"; then
+  printf "${RED}  FAIL${RESET} bootstrap does not repeat\n"
+  FAIL=$((FAIL + 1))
+else
+  printf "${GREEN}  PASS${RESET} bootstrap does not repeat\n"
+  PASS=$((PASS + 1))
+fi
+
+rm -f "/tmp/remembrall-bootstrap/test-bootstrap-sess"
+rm -rf "$TEST_CWD_BS"
+
+# ── Calibration pairs ────────────────────────────────────────────
+echo ""
+echo "Calibration pairs (Phase 3):"
+
+rm -f "$HOME/.remembrall/calibration.json"
+
+# Create a transcript for pair logging
+PAIR_TRANSCRIPT="$TMPDIR_ROOT/pair_transcript.jsonl"
+PAIR_TEXT=$(printf '%0500d' 0)
+for i in $(seq 1 200); do
+  echo '{"type":"assistant","message":{"model":"claude-opus-4-6","content":[{"type":"text","text":"'"$PAIR_TEXT"'"}]}}' >> "$PAIR_TRANSCRIPT"
+done
+
+# Log 6 pairs (need >=5 for correction offset)
+for i in $(seq 1 6); do
+  bridge=$((40 + i))
+  structural=$((35 + i))
+  remembrall_log_calibration_pair "$PAIR_TRANSCRIPT" "$bridge" "$structural" 2>/dev/null
+done
+
+# Check pairs were stored
+PAIR_COUNT=$(jq '.pairs["claude-opus-4-6"] | length' "$HOME/.remembrall/calibration.json" 2>/dev/null)
+assert_eq "6 pairs stored" "6" "$PAIR_COUNT"
+
+# Check correction offset (bridge is ~5% higher than structural)
+OFFSET=$(remembrall_correction_offset "claude-opus-4-6" 2>/dev/null)
+if [ -n "$OFFSET" ] && [ "$OFFSET" -ge 3 ] && [ "$OFFSET" -le 7 ] 2>/dev/null; then
+  printf "${GREEN}  PASS${RESET} correction offset is ~5 (got: %s)\n" "$OFFSET"
+  PASS=$((PASS + 1))
+else
+  printf "${RED}  FAIL${RESET} correction offset is ~5 (got: %s)\n" "$OFFSET"
+  FAIL=$((FAIL + 1))
+fi
+
+# No pairs for unknown model — should return empty
+OFFSET_UNKNOWN=$(remembrall_correction_offset "unknown-model" 2>/dev/null)
+assert_eq "no offset for unknown model" "" "$OFFSET_UNKNOWN"
+
+# <5 pairs — should return empty
+rm -f "$HOME/.remembrall/calibration.json"
+for i in $(seq 1 3); do
+  remembrall_log_calibration_pair "$PAIR_TRANSCRIPT" "50" "45" 2>/dev/null
+done
+OFFSET_FEW=$(remembrall_correction_offset "claude-opus-4-6" 2>/dev/null)
+assert_eq "no offset with <5 pairs" "" "$OFFSET_FEW"
+
+rm -f "$HOME/.remembrall/calibration.json"
+
+# ── Self-correcting feedback loop (Phase 5) ──────────────────────
+echo ""
+echo "Self-correcting feedback (Phase 5):"
+
+# No correction available — should return original value
+R=$(remembrall_apply_correction "42" "unknown-model" 2>/dev/null)
+assert_eq "no correction returns original" "42" "$R"
+
+# With correction data
+echo '{"samples":[],"models":{},"pairs":{}}' > "$HOME/.remembrall/calibration.json"
+CORR_TRANSCRIPT="$TMPDIR_ROOT/corr_transcript.jsonl"
+CORR_TEXT=$(printf '%0500d' 0)
+for i in $(seq 1 200); do
+  echo '{"type":"assistant","message":{"model":"claude-sonnet-4-6","content":[{"type":"text","text":"'"$CORR_TEXT"'"}]}}' >> "$CORR_TRANSCRIPT"
+done
+# Bridge always 8% higher → offset ~8
+for i in $(seq 1 6); do
+  remembrall_log_calibration_pair "$CORR_TRANSCRIPT" "50" "42" 2>/dev/null
+done
+R=$(remembrall_apply_correction "35" "claude-sonnet-4-6" 2>/dev/null)
+if [ -n "$R" ] && [ "$R" -ge 40 ] && [ "$R" -le 50 ] 2>/dev/null; then
+  printf "${GREEN}  PASS${RESET} correction applied: 35 → %s (offset ~8)\n" "$R"
+  PASS=$((PASS + 1))
+else
+  printf "${RED}  FAIL${RESET} correction applied: 35 → %s (expected 40-50)\n" "$R"
+  FAIL=$((FAIL + 1))
+fi
+
+# Cap at ±15% — log extreme offsets
+rm -f "$HOME/.remembrall/calibration.json"
+echo '{"samples":[],"models":{},"pairs":{}}' > "$HOME/.remembrall/calibration.json"
+for i in $(seq 1 6); do
+  remembrall_log_calibration_pair "$CORR_TRANSCRIPT" "70" "40" 2>/dev/null  # offset ~30
+done
+R=$(remembrall_apply_correction "20" "claude-sonnet-4-6" 2>/dev/null)
+# Should cap at +15: 20 + 15 = 35
+if [ -n "$R" ] && [ "$R" -eq 35 ] 2>/dev/null; then
+  printf "${GREEN}  PASS${RESET} correction capped at ±15%% (20 → %s)\n" "$R"
+  PASS=$((PASS + 1))
+else
+  printf "${RED}  FAIL${RESET} correction capped at ±15%% (20 → %s, expected 35)\n" "$R"
+  FAIL=$((FAIL + 1))
+fi
+
+rm -f "$HOME/.remembrall/calibration.json"
+
+# ── Growth tracking (Phase 4) ────────────────────────────────────
+echo ""
+echo "Growth tracking (Phase 4):"
+
+rm -rf "/tmp/remembrall-growth"
+
+# Create growing transcript
+GROWTH_TRANSCRIPT_1="$TMPDIR_ROOT/growth_transcript_1.jsonl"
+GROWTH_TEXT=$(printf '%0500d' 0)
+for i in $(seq 1 100); do
+  echo '{"type":"assistant","message":{"model":"claude-opus-4-6","content":[{"type":"text","text":"'"$GROWTH_TEXT"'"}]}}' >> "$GROWTH_TRANSCRIPT_1"
+done
+
+# First measurement — no deltas yet
+R=$(remembrall_track_growth "test-growth-sess" "$GROWTH_TRANSCRIPT_1" 2>/dev/null)
+AVG=$(printf '%s' "$R" | cut -f1)
+assert_eq "first measurement: avg growth is 0" "0" "$AVG"
+
+# Add more content and track again
+GROWTH_TRANSCRIPT_2="$TMPDIR_ROOT/growth_transcript_2.jsonl"
+cp "$GROWTH_TRANSCRIPT_1" "$GROWTH_TRANSCRIPT_2"
+for i in $(seq 1 50); do
+  echo '{"type":"assistant","message":{"model":"claude-opus-4-6","content":[{"type":"text","text":"'"$GROWTH_TEXT"'"}]}}' >> "$GROWTH_TRANSCRIPT_2"
+done
+
+R=$(remembrall_track_growth "test-growth-sess" "$GROWTH_TRANSCRIPT_2" 2>/dev/null)
+AVG=$(printf '%s' "$R" | cut -f1)
+if [ -n "$AVG" ] && [ "$AVG" -gt 0 ] 2>/dev/null; then
+  printf "${GREEN}  PASS${RESET} second measurement: growth rate >0 (%s)\n" "$AVG"
+  PASS=$((PASS + 1))
+else
+  printf "${RED}  FAIL${RESET} second measurement: growth rate >0 (got: %s)\n" "$AVG"
+  FAIL=$((FAIL + 1))
+fi
+
+# Prompts until threshold
+R=$(remembrall_prompts_until_threshold "100000" "10000" "358400" "20" 2>/dev/null)
+# threshold_bytes = 358400 * 80/100 = 286720; remaining = 286720 - 100000 = 186720; prompts = 186720/10000 = 18
+if [ -n "$R" ] && [ "$R" -gt 0 ] 2>/dev/null; then
+  printf "${GREEN}  PASS${RESET} prompts_until_threshold returns >0 (%s)\n" "$R"
+  PASS=$((PASS + 1))
+else
+  printf "${RED}  FAIL${RESET} prompts_until_threshold returns >0 (got: %s)\n" "$R"
+  FAIL=$((FAIL + 1))
+fi
+
+# Zero growth — should return error
+R=$(remembrall_prompts_until_threshold "100000" "0" "358400" "20" 2>/dev/null) && STATUS=0 || STATUS=1
+assert_eq "zero growth returns error" "1" "$STATUS"
+
+# Already past threshold
+R=$(remembrall_prompts_until_threshold "350000" "10000" "358400" "20" 2>/dev/null)
+assert_eq "past threshold returns 0" "0" "$R"
+
+rm -rf "/tmp/remembrall-growth"
 
 
 # ═══════════════════════════════════════════════════════════════════

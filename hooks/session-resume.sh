@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SessionStart hook: injects handoff content directly on resume
+# SessionStart hook: auto-configures bridge + injects handoff content on resume
 # Only resumes own session's handoff — never picks up other sessions' handoffs
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
@@ -17,7 +17,84 @@ if [ -z "$CWD" ]; then
   exit 0
 fi
 
-# For fresh session starts (not compact/clear): just exit (bridge is optional now)
+# ── Layer 1: Auto-inject bridge into settings.json ────────────────
+# On every session start, check if the bridge snippet exists.
+# If missing, inject it so the status line writes context % to /tmp.
+# Self-healing: if user removes it, next session re-injects.
+_remembrall_ensure_bridge() {
+  local settings_file="$HOME/.claude/settings.json"
+  mkdir -p "$HOME/.claude" 2>/dev/null
+  [ -f "$settings_file" ] || echo '{}' > "$settings_file"
+
+  # Already has bridge? Skip.
+  if grep -q "claude-context-pct" "$settings_file" 2>/dev/null; then
+    return 0
+  fi
+
+  # Check if there's a statusLine command to inject into
+  local has_statusline
+  has_statusline=$(jq -r '.statusLine.command // empty' "$settings_file" 2>/dev/null)
+  if [ -z "$has_statusline" ]; then
+    # No status line — create one with bridge built in
+    local bridge_cmd='input=$(cat); session_id=$(echo "$input" | jq -r '"'"'.session_id // empty'"'"'); remaining=$(echo "$input" | jq -r '"'"'.context_remaining // empty'"'"'); CTX_DIR="/tmp/claude-context-pct"; mkdir -p "$CTX_DIR" 2>/dev/null; if [ -n "$remaining" ]; then printf "%s" "$remaining" > "$CTX_DIR/${session_id}" 2>/dev/null; fi; echo "ctx: ${remaining:-?}%"'
+    local tmp
+    tmp=$(mktemp "${settings_file}.XXXXXX")
+    jq --arg cmd "$bridge_cmd" '.statusLine.command = $cmd' "$settings_file" > "$tmp" 2>/dev/null
+    if [ $? -eq 0 ] && [ -s "$tmp" ]; then
+      mv "$tmp" "$settings_file"
+      echo "Remembrall: bridge status line created in settings.json" >&2
+    else
+      rm -f "$tmp"
+    fi
+    return 0
+  fi
+
+  # Check if session_id is already extracted in the status line
+  local has_session_id=false
+  if echo "$has_statusline" | grep -q 'session_id' 2>/dev/null; then
+    has_session_id=true
+  fi
+
+  # Build the bridge snippet
+  local bridge_snippet
+  if [ "$has_session_id" = true ]; then
+    # session_id already extracted — just add bridge write
+    bridge_snippet='CTX_DIR="/tmp/claude-context-pct"; mkdir -p "$CTX_DIR" 2>/dev/null; printf "%s" "$remaining" > "$CTX_DIR/${session_id}" 2>/dev/null;'
+  else
+    # Need to also extract session_id
+    bridge_snippet='session_id=$(echo "$input" | jq -r '"'"'.session_id // empty'"'"'); CTX_DIR="/tmp/claude-context-pct"; mkdir -p "$CTX_DIR" 2>/dev/null; printf "%s" "$remaining" > "$CTX_DIR/${session_id}" 2>/dev/null;'
+  fi
+
+  # Find the insertion point: end of the 'if [ -n "$remaining" ]' block
+  # Strategy: append bridge snippet before the final 'fi; echo' or before 'echo "$status"'
+  local new_command
+  new_command=$(jq -r '.statusLine.command' "$settings_file" 2>/dev/null)
+
+  # Check if there's a remaining check block we can append to
+  if echo "$new_command" | grep -q 'remaining' 2>/dev/null; then
+    # Insert bridge before the last 'fi;' that closes the remaining block
+    # Use the pattern: find the last 'fi; echo "$status"' and insert before it
+    new_command=$(printf '%s' "$new_command" | sed "s|; echo \"\\\$status\"|; ${bridge_snippet} echo \"\\\$status\"|")
+  else
+    # No remaining block — append bridge at the end (before echo "$status")
+    new_command="${new_command}; ${bridge_snippet}"
+  fi
+
+  # Write back to settings.json atomically
+  local tmp
+  tmp=$(mktemp "${settings_file}.XXXXXX")
+  jq --arg cmd "$new_command" '.statusLine.command = $cmd' "$settings_file" > "$tmp" 2>/dev/null
+  if [ $? -eq 0 ] && [ -s "$tmp" ]; then
+    mv "$tmp" "$settings_file"
+    echo "Remembrall: bridge auto-configured in settings.json" >&2
+  else
+    rm -f "$tmp"
+  fi
+}
+
+_remembrall_ensure_bridge
+
+# For fresh session starts (not compact/clear): just exit
 if [ "$SOURCE" != "compact" ] && [ "$SOURCE" != "clear" ]; then
   exit 0
 fi

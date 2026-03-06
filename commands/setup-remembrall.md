@@ -1,9 +1,11 @@
 ---
 name: setup-remembrall
-description: One-time setup — adds the status-line bridge snippet that feeds context % to remembrall's hooks
+description: Manual fallback — the bridge auto-configures on install. Use this only if auto-setup failed or you want to customize the gauge.
 ---
 
-# Setup Remembrall Bridge
+# Setup Remembrall Bridge (Manual Fallback)
+
+**Note:** Since v2.3.0, the bridge auto-configures on first session start. You only need this command if auto-setup failed or you want to customize the Remembrall gauge.
 
 Remembrall needs a small bridge in your Claude Code status line to feed context window % to its hooks. This command helps you add it.
 

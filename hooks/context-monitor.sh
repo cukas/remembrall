@@ -23,11 +23,41 @@ remembrall_publish_session_id "$CWD" "$SESSION_ID"
 # Find bridge file (checks CWD + parent dirs), fall back to transcript size
 ESTIMATED=""
 REMAINING=""
+BRIDGE_ACTIVE=false
 CTX_FILE=$(remembrall_find_bridge "$CWD" "$SESSION_ID") 2>/dev/null
 if [ -n "$CTX_FILE" ]; then
   REMAINING=$(cat "$CTX_FILE" 2>/dev/null)
-  if ! remembrall_validate_number "$REMAINING"; then
+  if remembrall_validate_number "$REMAINING"; then
+    BRIDGE_ACTIVE=true
+  else
     REMAINING=""
+  fi
+fi
+
+# ── Layer 2: Bootstrap bridge for current session ──────────────────
+# If no bridge file exists and we haven't bootstrapped yet, fire a one-time
+# additionalContext asking Claude to write the bridge file. ~20 tokens, fires once.
+if [ "$BRIDGE_ACTIVE" = false ]; then
+  BOOTSTRAP_DIR="/tmp/remembrall-bootstrap"
+  mkdir -p "$BOOTSTRAP_DIR"
+  BOOTSTRAP_FILE="$BOOTSTRAP_DIR/$SESSION_ID"
+
+  if [ ! -f "$BOOTSTRAP_FILE" ]; then
+    # Mark as bootstrapped (don't repeat)
+    echo "1" > "$BOOTSTRAP_FILE"
+    # Ask Claude to write bridge file — only if settings.json has the bridge
+    if grep -q "claude-context-pct" "$HOME/.claude/settings.json" 2>/dev/null; then
+      # Bridge is in settings but file doesn't exist yet — it'll appear on next response cycle
+      true  # No action needed — settings.json bridge will activate naturally
+    else
+      # No bridge in settings — request Claude to write it manually (one-time, ~20 tokens)
+      cat << BOOTSTRAP_EOF
+{
+  "additionalContext": "Write your context remaining % as an integer to /tmp/claude-context-pct/${SESSION_ID}"
+}
+BOOTSTRAP_EOF
+      exit 0
+    fi
   fi
 fi
 
@@ -58,6 +88,59 @@ if remembrall_gt "$REMAINING" 60; then
   exit 0
 fi
 
+# ── Extract shared values for calibration + growth (runs once at <=60%) ──
+CONTENT_BYTES=""
+MODEL_NAME=""
+if [ -n "$TRANSCRIPT_PATH" ] && [ -f "$TRANSCRIPT_PATH" ]; then
+  CONTENT_BYTES=$(remembrall_extract_content_bytes "$TRANSCRIPT_PATH" 2>/dev/null)
+  local_model_info=$(remembrall_detect_model "$TRANSCRIPT_PATH")
+  MODEL_NAME=$(printf '%s' "$local_model_info" | cut -f1)
+fi
+
+# ── Bridge-derived content_max: auto-calibrate per user ──────────
+# When bridge is active, derive the real content_max for this user's setup.
+# This replaces hardcoded defaults with measured values.
+if [ "$BRIDGE_ACTIVE" = true ] && [ -n "$CONTENT_BYTES" ] && [ "$CONTENT_BYTES" -gt 0 ] 2>/dev/null; then
+  remembrall_store_derived_content_max "$CONTENT_BYTES" "$REMAINING" "$MODEL_NAME" 2>/dev/null
+fi
+
+# ── Bridge-paired calibration: log pair when both sources available ──
+if [ "$BRIDGE_ACTIVE" = true ] && [ -n "$TRANSCRIPT_PATH" ] && [ -f "$TRANSCRIPT_PATH" ]; then
+  STRUCTURAL_EST=$(remembrall_estimate_context_structural "$TRANSCRIPT_PATH" 2>/dev/null)
+  if [ -n "$STRUCTURAL_EST" ] && [ -n "$REMAINING" ]; then
+    remembrall_log_calibration_pair "$TRANSCRIPT_PATH" "$REMAINING" "$STRUCTURAL_EST" 2>/dev/null
+  fi
+fi
+
+# ── Growth tracking (runs at <=60% to keep >60% path fast) ──────
+PROMPTS_MSG=""
+if [ -n "$TRANSCRIPT_PATH" ] && [ -f "$TRANSCRIPT_PATH" ]; then
+  GROWTH_RESULT=$(remembrall_track_growth "$SESSION_ID" "$TRANSCRIPT_PATH" 2>/dev/null)
+  if [ -n "$GROWTH_RESULT" ]; then
+    AVG_GROWTH=$(printf '%s' "$GROWTH_RESULT" | cut -f1)
+    IS_VOLATILE=$(printf '%s' "$GROWTH_RESULT" | cut -f2)
+    if [ "$AVG_GROWTH" -gt 0 ] 2>/dev/null; then
+      # Get content_max for prompts-until-threshold calculation
+      local_content_max=$(remembrall_calibrated_content_max "$TRANSCRIPT_PATH" 2>/dev/null)
+      if [ -z "$local_content_max" ] || [ "$local_content_max" -eq 0 ] 2>/dev/null; then
+        case "$MODEL_NAME" in
+          claude-opus-4-6*|claude-opus-4*)   local_content_max=358400 ;;
+          claude-sonnet-4-6*|claude-sonnet-4*) local_content_max=337920 ;;
+          claude-haiku-4-5*|claude-haiku-4*)  local_content_max=317440 ;;
+          *)                                   local_content_max=337920 ;;
+        esac
+      fi
+      PROMPTS_LEFT=$(remembrall_prompts_until_threshold "$CONTENT_BYTES" "$AVG_GROWTH" "$local_content_max" 20 2>/dev/null)
+      if [ -n "$PROMPTS_LEFT" ] && [ "$PROMPTS_LEFT" -gt 0 ] 2>/dev/null; then
+        PROMPTS_MSG=" (~${PROMPTS_LEFT} prompts to 20%)"
+      fi
+      if [ "$IS_VOLATILE" = "1" ]; then
+        PROMPTS_MSG="${PROMPTS_MSG} [volatile session]"
+      fi
+    fi
+  fi
+fi
+
 # <=60% and >30% — JOURNAL CHECKPOINT
 if remembrall_gt "$REMAINING" 30; then
   if [ "$LAST_NUDGE" = "journal" ] || [ "$LAST_NUDGE" = "warning" ] || [ "$LAST_NUDGE" = "urgent" ]; then
@@ -68,7 +151,7 @@ if remembrall_gt "$REMAINING" 30; then
   SPELL="Spells: Expecto Patronum=/handoff, Lumos=/status, Accio=/replay, Prior Incantato=handoff count this session (only if user speaks HP)"
   cat << EOF
 {
-  "additionalContext": "${GAUGE} ${REMAINING}% remaining${ESTIMATED}. Run /handoff to save progress. ${SPELL}"
+  "additionalContext": "${GAUGE} ${REMAINING}% remaining${ESTIMATED}${PROMPTS_MSG}. Run /handoff to save progress. ${SPELL}"
 }
 EOF
   exit 0
@@ -112,14 +195,14 @@ if remembrall_le "$REMAINING" 20; then
   if [ "$IS_AUTONOMOUS" = true ]; then
     cat << EOF
 {
-  "additionalContext": "${GAUGE} ${REMAINING}% remaining${ESTIMATED}. AUTONOMOUS MODE (${AUTONOMOUS_SKILL}) — IMMEDIATELY run /handoff, continue working."
+  "additionalContext": "${GAUGE} ${REMAINING}% remaining${ESTIMATED}${PROMPTS_MSG}. AUTONOMOUS MODE (${AUTONOMOUS_SKILL}) — IMMEDIATELY run /handoff, continue working."
 }
 EOF
   else
     _create_preemptive_handoff
     cat << EOF
 {
-  "additionalContext": "${GAUGE} ${REMAINING}% remaining${ESTIMATED}. IMMEDIATELY run /handoff then EnterPlanMode."
+  "additionalContext": "${GAUGE} ${REMAINING}% remaining${ESTIMATED}${PROMPTS_MSG}. IMMEDIATELY run /handoff then EnterPlanMode."
 }
 EOF
   fi
@@ -135,7 +218,7 @@ GAUGE=$(remembrall_gauge "$REMAINING")
 if [ "$IS_AUTONOMOUS" = true ]; then
   cat << EOF
 {
-  "additionalContext": "${GAUGE} ${REMAINING}% remaining${ESTIMATED}. AUTONOMOUS MODE (${AUTONOMOUS_SKILL}) — run /handoff, continue working."
+  "additionalContext": "${GAUGE} ${REMAINING}% remaining${ESTIMATED}${PROMPTS_MSG}. AUTONOMOUS MODE (${AUTONOMOUS_SKILL}) — run /handoff, continue working."
 }
 EOF
 else
@@ -143,7 +226,7 @@ else
   SPELL="Spells: Expecto Patronum=/handoff, Lumos=/status, Accio=/replay, Prior Incantato=handoff count this session (only if user speaks HP)"
   cat << EOF
 {
-  "additionalContext": "${GAUGE} ${REMAINING}% remaining${ESTIMATED}. Run /handoff then EnterPlanMode. ${SPELL}"
+  "additionalContext": "${GAUGE} ${REMAINING}% remaining${ESTIMATED}${PROMPTS_MSG}. Run /handoff then EnterPlanMode. ${SPELL}"
 }
 EOF
 fi
