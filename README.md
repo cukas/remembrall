@@ -37,7 +37,7 @@ Remembrall monitors your context window in real-time, keeps a running session jo
 
 ## What's New in v2
 
-- **Zero-Setup Experience** — Remembrall works out of the box with no manual configuration. The self-calibrating transcript estimator learns your context window size after 1-2 compaction events, improving accuracy automatically. The optional status-line bridge is still supported for maximum precision but is no longer required.
+- **Zero-Setup Experience** — Remembrall works out of the box with no manual configuration. The status-line bridge is auto-configured on first session, and the estimator auto-calibrates from bridge data within minutes — no compaction events needed. Every user gets accurate context tracking regardless of their plugin/skill setup.
 
 - **No External Dependencies** — Removed the `bc` requirement. All comparisons use integer arithmetic. Only `jq` is required (and hooks exit gracefully without it).
 
@@ -69,7 +69,7 @@ Remembrall monitors your context window in real-time, keeps a running session jo
 
 ## How It Works
 
-> **Zero-setup by default.** Remembrall works out of the box using self-calibrating transcript estimation. After 1-2 sessions, the estimator learns your typical context window size and triggers accurately. For maximum precision, you can optionally run `/setup-remembrall` to set up the status-line bridge — but it's not required.
+> **Zero-setup by default.** Remembrall auto-configures the status-line bridge on first session and derives per-user context limits from bridge data. No compaction events needed — the estimator calibrates within minutes of the bridge activating.
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
@@ -159,16 +159,11 @@ claude plugin install remembrall@cukas
 
 Run `/remembrall-status` to verify.
 
-### Optional: Set up the status-line bridge (for maximum precision)
+### Status-line bridge (auto-configured)
 
-The self-calibrating estimator is accurate after 1-2 sessions. For immediate precision on the first session, you can optionally run `/setup-remembrall` to install a status-line bridge that writes exact context % to a temp file.
+The bridge is auto-configured on first session — no manual setup needed. If you already have a custom `statusLine` in `~/.claude/settings.json`, Remembrall injects the bridge snippet into it. If you have no status line, Remembrall creates one that shows context % with the Remembrall gauge.
 
-The bridge snippet requires `session_id` to be extracted in your status line (add `session_id=$(echo "$input" | jq -r '.session_id // empty');` alongside your other extractions). Then add this inside your existing `if [ -n "$remaining" ]; then ... fi` block:
-
-```bash
-CTX_DIR="/tmp/claude-context-pct"; mkdir -p "$CTX_DIR" 2>/dev/null;
-printf "%s" "$remaining" > "$CTX_DIR/${session_id}" 2>/dev/null;
-```
+Run `/setup-remembrall` to customize the gauge appearance or reconfigure if needed.
 
 ## Configuration
 
@@ -179,8 +174,7 @@ Remembrall uses `~/.remembrall/config.json` for persistent settings. Run `/setup
   "git_integration": true,
   "team_handoffs": false,
   "autonomous_mode": false,
-  "retention_hours": 72,
-  "max_transcript_kb": 256
+  "retention_hours": 72
 }
 ```
 
@@ -190,13 +184,21 @@ Remembrall uses `~/.remembrall/config.json` for persistent settings. Run `/setup
 | `team_handoffs` | `false` | Copy handoffs to project-local `.remembrall/handoffs/` |
 | `autonomous_mode` | `false` | Skip plan mode (no human click needed) — use `/handoff` + auto-compaction instead. Enable for overnight/unattended runs. |
 | `retention_hours` | `72` | Hours to keep handoff files before auto-cleanup |
-| `max_transcript_kb` | `256` | Expected max transcript size in KB (for fallback context estimation) |
+| `max_transcript_kb` | *(auto)* | Override max transcript size in KB. Rarely needed — bridge-derived calibration handles this automatically. |
 
 Settings apply globally — once configured, all Claude sessions respect them. Values are stored as native JSON types (booleans, numbers).
 
 ## Self-Calibrating Context Estimation
 
-Remembrall estimates how much context remains by measuring the transcript file size against a known maximum. On the first session, it uses a conservative default (256KB). After each compaction event, it records the actual transcript size where context ran out. After 1-2 compactions, the estimator uses the average of observed values — becoming accurate for your specific usage patterns.
+Remembrall uses a multi-layer estimation strategy:
+
+1. **Bridge truth** (most accurate) — The status-line bridge writes Claude's actual context remaining % to `/tmp/claude-context-pct/{session_id}`. Auto-configured on first session.
+
+2. **Bridge-derived calibration** — While the bridge is active, Remembrall derives `content_max` (how many content bytes fit before context runs out) from the equation: `content_max = content_bytes / used_pct`. This auto-calibrates per user, per model — accounting for your specific overhead (plugins, skills, system prompt size). No compaction needed.
+
+3. **Structural JSONL parser** — When the bridge is stale (>120s response), falls back to parsing transcript content bytes and comparing against the bridge-derived `content_max`. Accurate because it uses calibrated limits, not hardcoded defaults.
+
+4. **File-size fallback** — Last resort when structural parsing fails. Uses raw transcript size against calibrated or model-specific maximums.
 
 Calibration data is stored at `~/.remembrall/calibration.json` and persists across sessions. If you want to reset calibration (e.g., after changing models), delete this file.
 
