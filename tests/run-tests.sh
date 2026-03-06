@@ -71,6 +71,7 @@ cleanup() {
   rm -f /tmp/remembrall-nudges/test-sess 2>/dev/null
   rm -f /tmp/remembrall-nudges/test-auto-sess 2>/dev/null
   rm -f /tmp/remembrall-autonomous/test-auto-sess 2>/dev/null
+  rm -f /tmp/remembrall-handoff-count/test-create-sess 2>/dev/null
   rm -f /tmp/remembrall-sessions/$(remembrall_md5 "/tmp/test-bridge-project" 2>/dev/null) 2>/dev/null
   true
 }
@@ -421,7 +422,7 @@ assert_eq "85% remaining: silent" "" "$OUTPUT"
 echo "50" > "$CTX_DIR/test-sess"
 rm -f "/tmp/remembrall-nudges/test-sess"
 OUTPUT=$(echo '{"session_id":"test-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
-assert_match "50% triggers checkpoint nudge" "Context checkpoint" "$OUTPUT"
+assert_match "50% triggers checkpoint nudge" "remaining.*save progress" "$OUTPUT"
 assert_match "50% checkpoint suggests /handoff" "/handoff" "$OUTPUT"
 
 # 50% again — should be suppressed (already nudged)
@@ -431,13 +432,13 @@ assert_eq "50% second time: suppressed" "" "$OUTPUT"
 # 25% — warning with plan mode
 echo "25" > "$CTX_DIR/test-sess"
 OUTPUT=$(echo '{"session_id":"test-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
-assert_match "25% triggers warning" "Context getting low" "$OUTPUT"
+assert_match "25% triggers warning" "remaining.*EnterPlanMode" "$OUTPUT"
 assert_match "25% warning suggests EnterPlanMode" "EnterPlanMode" "$OUTPUT"
 
 # 15% — urgent with plan mode
 echo "15" > "$CTX_DIR/test-sess"
 OUTPUT=$(echo '{"session_id":"test-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
-assert_match "15% triggers urgent" "Context critically low" "$OUTPUT"
+assert_match "15% triggers urgent" "remaining.*IMMEDIATELY" "$OUTPUT"
 assert_match "15% urgent requires EnterPlanMode" "EnterPlanMode" "$OUTPUT"
 assert_match "15% urgent says IMMEDIATELY" "IMMEDIATELY" "$OUTPUT"
 
@@ -583,10 +584,19 @@ echo "60" > "$CTX_DIR/test-stop-sess"
 OUTPUT=$(echo '{"session_id":"test-stop-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/stop-check.sh" 2>&1)
 assert_eq "60% remaining: no suggestion" "" "$OUTPUT"
 
-# Low context — suggest clear
+# Low context, no handoff — enforce handoff via additionalContext
 echo "30" > "$CTX_DIR/test-stop-sess"
+OUTPUT=$(echo '{"session_id":"test-stop-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/stop-check.sh" 2>/dev/null)
+assert_match "30% no handoff: enforces handoff" "MUST run /handoff" "$OUTPUT"
+
+# Low context, with handoff — suggest /clear + /replay via stderr
+HASH=$(remembrall_md5 "$TEST_CWD")
+STOP_HANDOFF_DIR="$HOME/.remembrall/handoffs/$HASH"
+mkdir -p "$STOP_HANDOFF_DIR"
+echo "test" > "$STOP_HANDOFF_DIR/handoff-test-stop-sess.md"
 OUTPUT=$(echo '{"session_id":"test-stop-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/stop-check.sh" 2>&1)
-assert_match "30% remaining: suggests /clear" "/clear" "$OUTPUT"
+assert_match "30% with handoff: suggests /clear" "/clear" "$OUTPUT"
+rm -rf "$STOP_HANDOFF_DIR"
 
 # Cleanup
 rm -f "$CTX_DIR/test-stop-sess"
@@ -644,6 +654,11 @@ else
   printf "${RED}  FAIL${RESET} handoff file was not created at: %s\n" "$OUTPUT"
   FAIL=$((FAIL + 1))
 fi
+
+# Verify handoff counter was incremented
+COUNTER_FILE="/tmp/remembrall-handoff-count/test-create-sess"
+[ -f "$COUNTER_FILE" ] && HCOUNT=$(cat "$COUNTER_FILE") || HCOUNT=0
+assert_eq "handoff counter incremented to 1" "1" "$HCOUNT"
 
 rm -rf "$TEST_CWD"
 HASH=$(remembrall_md5 "$TEST_CWD")

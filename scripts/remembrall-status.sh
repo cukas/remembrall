@@ -88,6 +88,16 @@ else
   echo "Patches:  None"
 fi
 
+# Session handoff count
+COUNTER_DIR="/tmp/remembrall-handoff-count"
+SESSION_ID="${CLAUDE_SESSION_ID:-}"
+if [ -n "$SESSION_ID" ] && [ -f "$COUNTER_DIR/$SESSION_ID" ]; then
+  HCOUNT=$(cat "$COUNTER_DIR/$SESSION_ID" 2>/dev/null || echo 0)
+  echo "Saves:    $HCOUNT handoff(s) this session"
+else
+  echo "Saves:    0 handoffs this session"
+fi
+
 # Autonomous mode
 AUTO_MODE=$(remembrall_config "autonomous_mode" "false")
 echo "Auto:     $AUTO_MODE"

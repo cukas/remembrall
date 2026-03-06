@@ -46,9 +46,31 @@ printf "%s" "$remaining" > "$CTX_DIR/${session_id}" 2>/dev/null;
 - If the user doesn't have a status line configured at all, they need to set one up first. Point them to the Claude Code docs on status line configuration.
 - The bridge snippet is idempotent — running it multiple times is harmless
 
+## Remembrall Gauge (Status Line)
+
+After the bridge is set up, offer to upgrade the context display to the Remembrall gauge:
+
+"Would you like the Remembrall crystal ball gauge in your status line? It shows a visual bar with Harry Potter theming — the crystal ball pulses and warns 'Obliviate!' when context gets critically low."
+
+If yes, find the existing context display block in the status line (the part inside `if [ -n "$remaining" ]`) and replace it with the Remembrall gauge. The gauge replaces `Context: XX% remaining` with a visual bar:
+
+```bash
+pct=${remaining%%.*}; w=10; filled=$((pct * w / 100)); [ $filled -gt $w ] && filled=$w; [ $filled -lt 0 ] && filled=0; empty=$((w - filled)); bar=''; for ((i=0;i<filled;i++)); do bar="${bar}█"; done; for ((i=0;i<empty;i++)); do bar="${bar}░"; done; pulse=$(($(date +%s) % 2)); if [ "$pct" -le 20 ] 2>/dev/null; then ctx_color='\033[31m'; if [ $pulse -eq 0 ]; then orb='🔮'; else orb='💀'; fi; glow=' Obliviate!'; elif [ "$pct" -le 40 ] 2>/dev/null; then ctx_color='\033[33m'; orb='🔮'; glow=' ⚡'; elif [ "$pct" -le 60 ] 2>/dev/null; then ctx_color='\033[33m'; orb='🔮'; glow=' ✦'; else ctx_color='\033[32m'; orb='🔮'; glow=''; fi; status="$status | $(printf "$ctx_color")${orb} [${bar}] ${pct}%${glow}$(printf '\033[0m')";
+```
+
+The gauge renders as:
+```
+>60%:   🔮 [████████░░] 80%              green, calm
+41-60%: 🔮 [█████░░░░░] 50% ✦            orange, sparkle
+21-40%: 🔮 [███░░░░░░░] 28% ⚡            orange, lightning
+≤20%:   💀 [██░░░░░░░░] 15% Obliviate!   red, pulsing 🔮↔💀
+```
+
+**Important:** The gauge snippet must go inside the existing `if [ -n "$remaining" ]` block. It replaces the existing `status="$status | Context:..."` line. Keep the bridge snippet (`CTX_DIR=...`) after the gauge — both are needed.
+
 ## Optional Features
 
-After the bridge is set up, present these optional features to the user:
+After the bridge and gauge are set up, present these optional features to the user:
 
 8. **Git Integration** — Ask: "Would you like remembrall to save git patches of your session's changes before handoff? Patches are stored in ~/.remembrall/patches/ — your repo stays untouched."
 

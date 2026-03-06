@@ -16,7 +16,16 @@ claude plugin install remembrall@cukas
 That's it. No setup needed. Remembrall monitors your context, warns you when it's running low, and seamlessly refreshes it using Claude Code's native plan mode.
 
 ```
-🟠 [████░░░░░░] 30%  →  Claude enters plan mode  →  "Yes, clear context"  →  back to work
+🔮 [████░░░░░░] 30% ⚡  →  /handoff  →  plan mode  →  "Yes, clear context"  →  back to work
+```
+
+Run `/setup-remembrall` to add the Remembrall gauge to your status line:
+
+```
+🔮 [████████░░] 80%              green, calm
+🔮 [█████░░░░░] 50% ✦            orange, sparkle
+🔮 [███░░░░░░░] 28% ⚡            lightning, danger
+💀 [██░░░░░░░░] 15% Obliviate!   memory wipe incoming — pulsing 🔮↔💀
 ```
 
 ---
@@ -52,9 +61,10 @@ Remembrall monitors your context window in real-time, keeps a running session jo
 
 - **Visual Context Gauge** — Color-coded progress bar in all nudge messages so you can see context health at a glance:
   ```
-  🟢 [████████░░] 80%   — plenty of room
-  🟠 [████░░░░░░] 40%   — journal checkpoint
-  🔴 [██░░░░░░░░] 15%   — urgent, plan mode triggered
+  🔮 [████████░░] 80%            — calm
+  🔮 [█████░░░░░] 50% ✦          — sparkle, checkpoint
+  🔮 [███░░░░░░░] 28% ⚡          — lightning, /handoff triggered
+  💀 [██░░░░░░░░] 15% Obliviate!  — memory wipe incoming (pulsing 🔮↔💀)
   ```
 
 ## How It Works
@@ -306,6 +316,8 @@ You're walking Claude through a complex codebase architecture so it can help new
 ## FAQ
 
 **Does Remembrall bloat my context?** No. It injects one handoff document on session resume (then deletes it). During a session, nudges appear as short stderr messages that don't consume tokens. There is no accumulated memory that grows over time.
+
+**Are there any easter eggs?** Maybe. Try speaking to Claude in the language of wizards when the Remembrall starts glowing. 🔮
 
 ## Privacy
 

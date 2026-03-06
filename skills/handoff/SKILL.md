@@ -17,6 +17,7 @@ Create a structured handoff document that any Claude instance can read to resume
    - Files created or modified (collect the full list)
    - Current blockers or open questions
    - Test status (passing/failing)
+   - Approaches tried that failed (with error messages)
    - Any task list items (check /tasks)
 
 2. **Write the handoff** — Pipe a markdown document to `handoff-create.sh`. The script handles all path computation, git patches, YAML frontmatter, and team copies automatically. Always pass `--session-id` with `$CLAUDE_SESSION_ID` so the handoff can be found by auto-resume after `/clear`.
@@ -41,8 +42,11 @@ Create a structured handoff document that any Claude instance can read to resume
    ## Remaining (after next step)
    - [Numbered list of what still needs to happen, in priority order]
 
+   ## Failed Approaches
+   - [Approaches tried and ruled out. For each: what was attempted, the exact error message or why it failed, and why it won't work. This prevents the next session from repeating the same dead ends.]
+
    ## Do NOT Do
-   - [Explicit list of things the next session must NOT do — files to leave alone, approaches already tried and ruled out, features that are done and should not be re-analyzed, rabbit holes to avoid]
+   - [Things the next session must NOT do — files to leave alone, features that are done and should not be re-analyzed, rabbit holes to avoid]
 
    ## Key Decisions
    - [Important choices made and why — so the next instance doesn't re-debate them]

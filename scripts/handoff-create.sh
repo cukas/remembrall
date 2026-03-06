@@ -177,9 +177,17 @@ if remembrall_team_enabled; then
   echo "team:$TEAM_DIR/handoff-${SESSION_ID}.md" >&2
 fi
 
-# ─── Clean up nudge state ───────────────────────────────────────
+# ─── Clean up nudge state + track handoff count ─────────────────
 
 rm -f "/tmp/remembrall-nudges/$SESSION_ID"
+
+# Increment session handoff counter
+COUNTER_DIR="/tmp/remembrall-handoff-count"
+mkdir -p "$COUNTER_DIR"
+COUNTER_FILE="$COUNTER_DIR/$SESSION_ID"
+PREV_COUNT=0
+[ -f "$COUNTER_FILE" ] && PREV_COUNT=$(cat "$COUNTER_FILE" 2>/dev/null || echo 0)
+echo $((PREV_COUNT + 1)) > "$COUNTER_FILE"
 
 # ─── Output ──────────────────────────────────────────────────────
 

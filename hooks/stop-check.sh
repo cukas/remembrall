@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Stop hook: if context is low, suggest /clear + /replay before starting new work.
-# This catches the case where Claude finishes a task but context is nearly full.
+# Stop hook: enforce handoff save when context is low, suggest /clear + /replay otherwise.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"
@@ -38,12 +37,32 @@ if [ -z "$REMAINING" ]; then
   ESTIMATED=" (estimated)"
 fi
 
-# Only suggest if below 40%
+# Only act if below 40%
 if remembrall_ge "$REMAINING" 40; then
   exit 0
 fi
 
-# Output to stderr — shown to user in terminal without risking Claude re-engagement
+# Check if a handoff already exists for this session
+HANDOFF_EXISTS=false
+if [ -n "$SESSION_ID" ] && [ -n "$CWD" ]; then
+  HASH=$(remembrall_md5 "$CWD")
+  HANDOFF_FILE="$HOME/.remembrall/handoffs/$HASH/handoff-${SESSION_ID}.md"
+  if [ -f "$HANDOFF_FILE" ]; then
+    HANDOFF_EXISTS=true
+  fi
+fi
+
 GAUGE=$(remembrall_gauge "$REMAINING")
-echo "Remembrall: ${GAUGE} Context is at ${REMAINING}%${ESTIMATED} remaining. Consider /clear + /replay before starting new work." >&2
+
+if [ "$HANDOFF_EXISTS" = true ]; then
+  # Handoff exists — just suggest /clear + /replay via stderr
+  echo "Remembrall: ${GAUGE} Context at ${REMAINING}%${ESTIMATED}. Handoff saved. Consider /clear + /replay before new work." >&2
+else
+  # No handoff — enforce handoff creation via additionalContext
+  cat << EOF
+{
+  "additionalContext": "${GAUGE} ${REMAINING}% remaining${ESTIMATED}. You MUST run /handoff before completing this task. Do not stop without saving state."
+}
+EOF
+fi
 exit 0
