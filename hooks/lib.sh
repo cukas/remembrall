@@ -20,60 +20,34 @@ remembrall_md5() {
   fi
 }
 
-# Find bridge file by checking CWD and all parent directories.
-# With session_id: returns only that session's bridge (hooks use this).
-# Without session_id: returns freshest bridge for the CWD (diagnostics).
+# Find bridge file for a session.
+# Bridge is keyed by session_id only (not CWD) because the status line's
+# workspace.current_dir can differ from the hook's CWD.
+# Without session_id: reads the published session_id for the CWD (diagnostics).
 # Ignores stale bridge files (>120s) — falls through to transcript estimation.
 remembrall_find_bridge() {
-  local dir="$1"
+  local cwd="$1"
   local session_id="$2"
   local ctx_dir="/tmp/claude-context-pct"
   local max_age=120
 
-  while [ "$dir" != "/" ]; do
-    local hash
-    hash=$(remembrall_md5 "$dir") || return 1
+  # Without session_id: try published session_id for this CWD (diagnostic use)
+  if [ -z "$session_id" ]; then
+    session_id=$(remembrall_read_session_id "$cwd" 2>/dev/null)
+  fi
 
-    if [ -n "$session_id" ]; then
-      # Try session-specific bridge first
-      local f="$ctx_dir/${hash}-${session_id}"
-      if [ -f "$f" ]; then
-        local age
-        age=$(remembrall_file_age "$f")
-        if [ "$age" -le "$max_age" ]; then
-          echo "$f"
-          return 0
-        fi
-      fi
-      # Fallback: shared bridge (old format or status line without session_id)
-      if [ -f "$ctx_dir/$hash" ]; then
-        local age
-        age=$(remembrall_file_age "$ctx_dir/$hash")
-        if [ "$age" -le "$max_age" ]; then
-          echo "$ctx_dir/$hash"
-          return 0
-        fi
-      fi
-    else
-      # Diagnostic: find freshest bridge for this CWD (any format)
-      local best="" best_age=999999
-      for f in "$ctx_dir/${hash}" "$ctx_dir/${hash}"-*; do
-        [ -f "$f" ] || continue
-        local age
-        age=$(remembrall_file_age "$f")
-        if [ "$age" -le "$max_age" ] && [ "$age" -lt "$best_age" ]; then
-          best="$f"
-          best_age="$age"
-        fi
-      done
-      if [ -n "$best" ]; then
-        echo "$best"
-        return 0
-      fi
+  [ -z "$session_id" ] && return 1
+
+  local f="$ctx_dir/$session_id"
+  if [ -f "$f" ]; then
+    local age
+    age=$(remembrall_file_age "$f")
+    if [ "$age" -le "$max_age" ]; then
+      echo "$f"
+      return 0
     fi
+  fi
 
-    dir=$(dirname "$dir")
-  done
   return 1
 }
 

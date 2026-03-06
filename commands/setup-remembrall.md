@@ -28,11 +28,7 @@ Your status line already has access to `$remaining` (context window % remaining)
 
 ```bash
 CTX_DIR="/tmp/claude-context-pct"; mkdir -p "$CTX_DIR" 2>/dev/null;
-if command -v md5 >/dev/null 2>&1; then
-  printf "%s" "$remaining" > "$CTX_DIR/$(md5 -qs "$cwd")-${session_id}" 2>/dev/null;
-elif command -v md5sum >/dev/null 2>&1; then
-  printf "%s" "$remaining" > "$CTX_DIR/$(printf '%s' "$cwd" | md5sum | cut -d' ' -f1)-${session_id}" 2>/dev/null;
-fi;
+printf "%s" "$remaining" > "$CTX_DIR/${session_id}" 2>/dev/null;
 ```
 
 6. **Edit the settings file** — Insert the bridge snippet into the status line command. The exact location depends on the user's existing status line format. Find the `if [ -n "$remaining" ]` block and add the bridge snippet inside it (after the existing context display logic, before the `fi`).
