@@ -6,7 +6,7 @@
 
 ```bash
 claude plugin marketplace add cukas/remembrall
-claude plugin install remembrall@remembrall
+claude plugin install remembrall@cukas
 ```
 
 That's it. No setup needed. Remembrall monitors your context, warns you when it's running low, and auto-saves structured handoffs so your next session picks up exactly where you left off.
@@ -127,7 +127,7 @@ Remembrall monitors your context window in real-time, keeps a running session jo
 
 ```bash
 claude plugin marketplace add cukas/remembrall
-claude plugin install remembrall@remembrall
+claude plugin install remembrall@cukas
 ```
 
 Run `/remembrall-status` to verify.

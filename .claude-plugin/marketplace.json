@@ -1,6 +1,6 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
-  "name": "remembrall",
+  "name": "cukas",
   "description": "Context handoff system for Claude Code — session journals, git patch snapshots, team handoffs, smart replay with state verification, and auto-resume on compaction/clear",
   "owner": {
     "name": "cukas"
