@@ -5,7 +5,8 @@
 **Context runs out → work gets lost.** Remembrall fixes that.
 
 ```bash
-claude plugin install remembrall@cukas
+claude plugin marketplace add github:cukas/remembrall
+claude plugin install remembrall@remembrall
 ```
 
 That's it. No setup needed. Remembrall monitors your context, warns you when it's running low, and auto-saves structured handoffs so your next session picks up exactly where you left off.
@@ -122,27 +123,14 @@ Remembrall monitors your context window in real-time, keeps a running session jo
 
 ## Installation
 
-### Quick install
+### Install
 
 ```bash
-claude plugin install remembrall@cukas
+claude plugin marketplace add github:cukas/remembrall
+claude plugin install remembrall@remembrall
 ```
 
-That's it. Run `/remembrall-status` to verify.
-
-### Manual install
-
-If the marketplace install isn't available, add to `~/.claude/settings.json`:
-
-```json
-{
-  "enabledPlugins": {
-    "remembrall@cukas": true
-  }
-}
-```
-
-Then run `/remembrall-status` to check everything is working.
+Run `/remembrall-status` to verify.
 
 ### Optional: Set up the status-line bridge (for maximum precision)
 
