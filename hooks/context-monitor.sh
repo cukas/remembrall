@@ -17,6 +17,9 @@ if [ -z "$CWD" ]; then
   exit 0
 fi
 
+# Publish session_id so skill commands (handoff-create.sh) can read it
+remembrall_publish_session_id "$CWD" "$SESSION_ID"
+
 # Find bridge file (checks CWD + parent dirs), fall back to transcript size
 ESTIMATED=""
 REMAINING=""

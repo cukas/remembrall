@@ -35,7 +35,7 @@ remembrall_find_bridge() {
     hash=$(remembrall_md5 "$dir") || return 1
 
     if [ -n "$session_id" ]; then
-      # Session-specific lookup
+      # Try session-specific bridge first
       local f="$ctx_dir/${hash}-${session_id}"
       if [ -f "$f" ]; then
         local age
@@ -45,10 +45,19 @@ remembrall_find_bridge() {
           return 0
         fi
       fi
+      # Fallback: shared bridge (old format or status line without session_id)
+      if [ -f "$ctx_dir/$hash" ]; then
+        local age
+        age=$(remembrall_file_age "$ctx_dir/$hash")
+        if [ "$age" -le "$max_age" ]; then
+          echo "$ctx_dir/$hash"
+          return 0
+        fi
+      fi
     else
-      # Diagnostic: find freshest bridge for this CWD
+      # Diagnostic: find freshest bridge for this CWD (any format)
       local best="" best_age=999999
-      for f in "$ctx_dir/${hash}"-*; do
+      for f in "$ctx_dir/${hash}" "$ctx_dir/${hash}"-*; do
         [ -f "$f" ] || continue
         local age
         age=$(remembrall_file_age "$f")
@@ -368,6 +377,32 @@ remembrall_retention_hours() {
 remembrall_team_handoff_dir() {
   local cwd="$1"
   echo "$cwd/.remembrall/handoffs"
+}
+
+# ─── Session ID Publishing ────────────────────────────────────────
+
+# Publish session_id so skill bash commands can read it.
+# Hooks have session_id from JSON input; Bash tool commands don't.
+# Written on every prompt by context-monitor.sh — always current.
+remembrall_publish_session_id() {
+  local cwd="$1"
+  local session_id="$2"
+  [ -z "$session_id" ] && return
+  local hash
+  hash=$(remembrall_md5 "$cwd") || return
+  local dir="/tmp/remembrall-sessions"
+  mkdir -p "$dir" 2>/dev/null
+  printf '%s' "$session_id" > "$dir/$hash" 2>/dev/null
+}
+
+# Read the published session_id for a CWD.
+# Used by handoff-create.sh when CLAUDE_SESSION_ID env var isn't available.
+remembrall_read_session_id() {
+  local cwd="$1"
+  local hash
+  hash=$(remembrall_md5 "$cwd") || return 1
+  local f="/tmp/remembrall-sessions/$hash"
+  [ -f "$f" ] && cat "$f" 2>/dev/null
 }
 
 # ─── Handoff Chains ──────────────────────────────────────────────

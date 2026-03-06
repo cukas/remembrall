@@ -35,6 +35,19 @@ if [ -n "$SESSION_ID" ] && [ -f "$HANDOFF_DIR/handoff-${SESSION_ID}.md" ]; then
   HANDOFF_FILE="$HANDOFF_DIR/handoff-${SESSION_ID}.md"
 fi
 
+# Recency fallback: if own-session handoff not found, check for one created
+# in the last 60s. Handles /handoff with timestamp ID (CLAUDE_SESSION_ID unavailable).
+if [ -z "$HANDOFF_FILE" ]; then
+  for f in "$HANDOFF_DIR"/handoff-*.md; do
+    [ -f "$f" ] || continue
+    local_age=$(remembrall_file_age "$f")
+    if [ "$local_age" -lt 60 ]; then
+      HANDOFF_FILE="$f"
+      break
+    fi
+  done
+fi
+
 # No handoff found
 if [ -z "$HANDOFF_FILE" ] || [ ! -f "$HANDOFF_FILE" ]; then
   exit 0

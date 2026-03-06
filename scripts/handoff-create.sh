@@ -49,7 +49,10 @@ while [ $# -gt 0 ]; do
 done
 
 CWD="${CWD:-$(pwd)}"
-SESSION_ID="${SESSION_ID_ARG:-${CLAUDE_SESSION_ID:-$(date +%s)}}"
+
+# Session ID priority: explicit arg > env var > published by hook > timestamp fallback
+PUBLISHED_SESSION=$(remembrall_read_session_id "$CWD" 2>/dev/null || echo "")
+SESSION_ID="${SESSION_ID_ARG:-${CLAUDE_SESSION_ID:-${PUBLISHED_SESSION:-$(date +%s)}}}"
 
 # ─── Read markdown content from stdin ────────────────────────────
 
