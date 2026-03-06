@@ -9,10 +9,10 @@ claude plugin marketplace add cukas/remembrall
 claude plugin install remembrall@cukas
 ```
 
-That's it. No setup needed. Remembrall monitors your context, warns you when it's running low, and auto-saves structured handoffs so your next session picks up exactly where you left off.
+That's it. No setup needed. Remembrall monitors your context, warns you when it's running low, and seamlessly refreshes it using Claude Code's native plan mode.
 
 ```
-🟠 [████░░░░░░] 40%  →  /handoff  →  /clear  →  /replay  →  back to work
+🟠 [████░░░░░░] 30%  →  Claude enters plan mode  →  "Yes, clear context"  →  back to work
 ```
 
 ---
@@ -42,11 +42,15 @@ Remembrall monitors your context window in real-time, keeps a running session jo
 
 - **Global Config** — One-time setup at `~/.remembrall/config.json` persists settings across all sessions. Configure git integration and team handoffs once, and every Claude session respects them.
 
+- **Plan Mode Integration** — At 30% remaining, Remembrall tells Claude to write a continuation plan and enter plan mode. The user sees Claude Code's native "Yes, clear context (30% used)" option — one click for a fresh start with the plan preserved. No more manual `/handoff` → `/clear` → `/replay`.
+
+- **Methodology Preservation** — The continuation plan includes a prescriptive "Resume With" section that tells the next session exactly which methodology to invoke — `/ralph-loop` iteration N, `/test-driven-development` with the next test to write, parallel agent dispatch for tasks A/B/C, `/systematic-debugging` with current hypothesis, etc. The next session doesn't just know *what* to do, but *how* to continue doing it the same way. Active MCP servers, skills, and agent-specific state are also captured.
+
 - **Visual Context Gauge** — Color-coded progress bar in all nudge messages so you can see context health at a glance:
   ```
   🟢 [████████░░] 80%   — plenty of room
-  🟠 [████░░░░░░] 40%   — journal checkpoint / warning
-  🔴 [██░░░░░░░░] 15%   — urgent, run /handoff now
+  🟠 [████░░░░░░] 40%   — journal checkpoint
+  🔴 [██░░░░░░░░] 15%   — urgent, plan mode triggered
   ```
 
 ## How It Works
@@ -57,7 +61,7 @@ Remembrall monitors your context window in real-time, keeps a running session jo
 ┌─────────────────────────────────────────────────────────────────┐
 │                        Claude Code Session                       │
 │                                                                  │
-│  Status Line ──writes──> /tmp/claude-context-pct/{hash}          │
+│  Status Line ──writes──> /tmp/claude-context-pct/{session_id}    │
 │       │                          │                               │
 │       │                   context-monitor.sh                     │
 │       │                   (UserPromptSubmit)                     │
@@ -71,14 +75,19 @@ Remembrall monitors your context window in real-time, keeps a running session jo
 │       │                  │                                       │
 │       │              <=60%? ── "journal" checkpoint nudge         │
 │       │                  │                                       │
-│       │              <=30%? ── "warning" nudge                   │
+│       │              <=30%? ── Claude writes continuation plan    │
+│       │                  │     (task, files, decisions,          │
+│       │                  │      "Resume With" methodology,       │
+│       │                  │      active tools/agents/skills)      │
+│       │                  │     + calls EnterPlanMode             │
 │       │                  │                                       │
-│       │              <=20%? ── "urgent" nudge + STOP             │
+│       │              <=20%? ── same, but IMMEDIATELY             │
 │       │                  │                                       │
 │       │                  ▼                                       │
-│       │            Auto /handoff                                 │
-│       │            + git patch capture (if enabled)              │
-│       │            + team copy (if enabled)                      │
+│       │            Plan mode UI appears:                         │
+│       │            "Yes, clear context (30% used)"               │
+│       │            User picks option 1 → fresh context           │
+│       │            with plan preserved                           │
 │       │                          │                               │
 │  ─── task complete ──────────────┤                               │
 │       │                          │                               │
@@ -89,16 +98,12 @@ Remembrall monitors your context window in real-time, keeps a running session jo
 │       │                          │                               │
 │  precompact-handoff.sh           │                               │
 │  (safety net — auto-generates    │                               │
-│   handoff with errors, git ops,  │                               │
-│   tasks, files, conversation     │                               │
+│   handoff from transcript        │                               │
 │   + git patch snapshot)          │                               │
 │       │                          │                               │
 │       ▼                          │                               │
 │  ~/.remembrall/handoffs/{hash}/handoff-{session}.md              │
 │  ~/.remembrall/patches/{hash}/patch-{session}.diff               │
-│  .remembrall/handoffs/ (team copy, if enabled)                   │
-│       │                          │                               │
-│  ─── /clear or compact resume ───┤                               │
 │       │                          │                               │
 │  session-resume.sh               │                               │
 │  (SessionStart — injects         │                               │
@@ -111,7 +116,7 @@ Remembrall monitors your context window in real-time, keeps a running session jo
 
 ## Five Layers of Protection
 
-1. **Early Warning** (`context-monitor.sh`) — Reads context % from a bridge file, or estimates it from transcript size as a fallback. Nudges Claude at 30% remaining ("context getting low, run /handoff") and 20% remaining ("context critically low, run /handoff").
+1. **Plan Mode Trigger** (`context-monitor.sh`) — Reads context % from a bridge file, or estimates it from transcript size as a fallback. At 30% remaining, tells Claude to write a continuation plan and call `EnterPlanMode`. The plan captures task state, files, decisions, **and a prescriptive "Resume With" section** (which skill/methodology to invoke, active agents, MCP servers). The user sees the native "Yes, clear context" option — one click for a fresh start. At 20%, the same but with urgent priority.
 
 2. **Journal Checkpoint** (`context-monitor.sh` at 60%) — Before things get urgent, Remembrall nudges Claude to update a running journal of progress. This keeps the handoff document incrementally current, so if compaction strikes between 60% and 30%, the handoff already reflects recent work.
 
@@ -246,7 +251,7 @@ Handoff files and patches are stored per-project:
 
 ### Long refactors that outlast a single context
 
-You're renaming a module across 40 files. Halfway through, context hits 30%. Remembrall nudges Claude to `/handoff` — it captures which files are done, which remain, and the naming convention you agreed on. After `/clear`, the next session picks up at file 21, not file 1.
+You're renaming a module across 40 files. Halfway through, context hits 30%. Remembrall tells Claude to write a continuation plan and enter plan mode. You see "Yes, clear context (30% used)" — pick option 1, and Claude continues at file 21 with a fresh context and the full plan preserved. One click, no manual steps.
 
 ### Multi-day feature builds
 
@@ -262,7 +267,7 @@ You're deep in a debugging session and didn't notice context getting low. Claude
 
 ### Code reviews and large PRs
 
-You're reviewing a 500-line PR file by file. Context fills up with diff content. At 30%, remembrall triggers — Claude saves which files are reviewed, the issues found so far, and which files still need review. Resume in a fresh session without re-reading files you already covered.
+You're reviewing a 500-line PR file by file. Context fills up with diff content. At 30%, Remembrall triggers — Claude enters plan mode with a summary of reviewed files, issues found, and what's left. Pick "clear context" and continue reviewing from where you left off.
 
 ### Teaching and onboarding
 
