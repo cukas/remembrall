@@ -64,11 +64,12 @@ mkdir -p "$HOME"
 
 cleanup() {
   rm -rf "$TMPDIR_ROOT"
-  # Clean up any bridge files we created in the real /tmp
-  rm -f /tmp/claude-context-pct/$(remembrall_md5 "/tmp/test-bridge-project" 2>/dev/null) 2>/dev/null
-  rm -f /tmp/claude-context-pct/$(remembrall_md5 "/tmp/remembrall-test-cwd-$$" 2>/dev/null) 2>/dev/null
-  rm -f /tmp/claude-context-pct/$(remembrall_md5 "/tmp/remembrall-test-stop-$$" 2>/dev/null) 2>/dev/null
+  # Clean up any bridge files we created in the real /tmp (keyed by session_id)
+  rm -f /tmp/claude-context-pct/test-bridge-sess 2>/dev/null
+  rm -f /tmp/claude-context-pct/test-sess 2>/dev/null
+  rm -f /tmp/claude-context-pct/test-stop-sess 2>/dev/null
   rm -f /tmp/remembrall-nudges/test-sess 2>/dev/null
+  rm -f /tmp/remembrall-sessions/$(remembrall_md5 "/tmp/test-bridge-project" 2>/dev/null) 2>/dev/null
   true
 }
 trap cleanup EXIT
@@ -315,24 +316,31 @@ assert_match "fresh file age is 0-2 seconds" '^[012]$' "$AGE"
 echo ""
 echo "remembrall_find_bridge:"
 
-# No bridge file
-R=$(remembrall_find_bridge "/tmp/nonexistent-project" 2>/dev/null) && STATUS=0 || STATUS=1
-assert_eq "no bridge returns error" "1" "$STATUS"
+# No bridge file (no session_id)
+R=$(remembrall_find_bridge "/tmp/nonexistent-project" "" 2>/dev/null) && STATUS=0 || STATUS=1
+assert_eq "no bridge returns error (no session_id)" "1" "$STATUS"
 
-# Create a bridge file
+# No bridge file (session_id but no file)
+R=$(remembrall_find_bridge "/tmp/nonexistent-project" "no-such-sess" 2>/dev/null) && STATUS=0 || STATUS=1
+assert_eq "no bridge returns error (file missing)" "1" "$STATUS"
+
+# Create a bridge file keyed by session_id
 CTX_DIR="/tmp/claude-context-pct"
 mkdir -p "$CTX_DIR"
-HASH=$(remembrall_md5 "/tmp/test-bridge-project")
-echo "42" > "$CTX_DIR/$HASH"
-R=$(remembrall_find_bridge "/tmp/test-bridge-project")
-assert_eq "finds bridge for exact cwd" "$CTX_DIR/$HASH" "$R"
+echo "42" > "$CTX_DIR/test-bridge-sess"
+R=$(remembrall_find_bridge "/tmp/test-bridge-project" "test-bridge-sess")
+assert_eq "finds bridge by session_id" "$CTX_DIR/test-bridge-sess" "$R"
 
-# Test parent directory walk
-R=$(remembrall_find_bridge "/tmp/test-bridge-project/src/deep/path")
-assert_eq "finds bridge via parent walk" "$CTX_DIR/$HASH" "$R"
+# Without session_id but with published session_id for CWD
+BRIDGE_CWD="/tmp/test-bridge-project"
+remembrall_publish_session_id "$BRIDGE_CWD" "test-bridge-sess"
+R=$(remembrall_find_bridge "$BRIDGE_CWD" "")
+assert_eq "finds bridge via published session_id" "$CTX_DIR/test-bridge-sess" "$R"
 
 # Cleanup bridge
-rm -f "$CTX_DIR/$HASH"
+rm -f "$CTX_DIR/test-bridge-sess"
+BRIDGE_HASH=$(remembrall_md5 "$BRIDGE_CWD")
+rm -f "/tmp/remembrall-sessions/$BRIDGE_HASH"
 
 # ── remembrall_frontmatter_get ────────────────────────────────────
 echo ""
@@ -396,51 +404,54 @@ echo "══════════════════════"
 echo ""
 echo "context-monitor.sh:"
 
-# Create a bridge file with high context remaining
+# Bridge files are keyed by session_id (not CWD hash)
 CTX_DIR="/tmp/claude-context-pct"
 mkdir -p "$CTX_DIR"
 TEST_CWD="/tmp/remembrall-test-cwd-$$"
 mkdir -p "$TEST_CWD"
-HASH=$(remembrall_md5 "$TEST_CWD")
 
 # High context (85%) — should produce no output
-echo "85" > "$CTX_DIR/$HASH"
+echo "85" > "$CTX_DIR/test-sess"
 OUTPUT=$(echo '{"session_id":"test-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
 assert_eq "85% remaining: silent" "" "$OUTPUT"
 
 # 50% — journal checkpoint
-echo "50" > "$CTX_DIR/$HASH"
+echo "50" > "$CTX_DIR/test-sess"
 rm -f "/tmp/remembrall-nudges/test-sess"
 OUTPUT=$(echo '{"session_id":"test-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
 assert_match "50% triggers checkpoint nudge" "Context checkpoint" "$OUTPUT"
+assert_match "50% checkpoint suggests /handoff" "/handoff" "$OUTPUT"
 
 # 50% again — should be suppressed (already nudged)
 OUTPUT=$(echo '{"session_id":"test-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
 assert_eq "50% second time: suppressed" "" "$OUTPUT"
 
-# 25% — warning
-echo "25" > "$CTX_DIR/$HASH"
+# 25% — warning with plan mode
+echo "25" > "$CTX_DIR/test-sess"
 OUTPUT=$(echo '{"session_id":"test-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
 assert_match "25% triggers warning" "Context getting low" "$OUTPUT"
+assert_match "25% warning suggests EnterPlanMode" "EnterPlanMode" "$OUTPUT"
 
-# 15% — urgent
-echo "15" > "$CTX_DIR/$HASH"
+# 15% — urgent with plan mode
+echo "15" > "$CTX_DIR/test-sess"
 OUTPUT=$(echo '{"session_id":"test-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
 assert_match "15% triggers urgent" "Context critically low" "$OUTPUT"
+assert_match "15% urgent requires EnterPlanMode" "EnterPlanMode" "$OUTPUT"
+assert_match "15% urgent says IMMEDIATELY" "IMMEDIATELY" "$OUTPUT"
 
 # 15% again — suppressed
 OUTPUT=$(echo '{"session_id":"test-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
 assert_eq "15% second time: suppressed" "" "$OUTPUT"
 
 # 90% — reset (post-compaction)
-echo "90" > "$CTX_DIR/$HASH"
+echo "90" > "$CTX_DIR/test-sess"
 OUTPUT=$(echo '{"session_id":"test-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
 assert_eq "90% post-compaction: silent + reset" "" "$OUTPUT"
 [ ! -f "/tmp/remembrall-nudges/test-sess" ] && R="cleaned" || R="exists"
 assert_eq "nudge file cleaned after reset" "cleaned" "$R"
 
 # Cleanup
-rm -f "$CTX_DIR/$HASH"
+rm -f "$CTX_DIR/test-sess"
 rm -rf "$TEST_CWD"
 rm -f "/tmp/remembrall-nudges/test-sess"
 
@@ -492,21 +503,20 @@ echo "stop-check.sh:"
 
 TEST_CWD="/tmp/remembrall-test-stop-$$"
 mkdir -p "$TEST_CWD"
-HASH=$(remembrall_md5 "$TEST_CWD")
 CTX_DIR="/tmp/claude-context-pct"
 
-# High context — no suggestion
-echo "60" > "$CTX_DIR/$HASH"
-OUTPUT=$(echo '{"cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/stop-check.sh" 2>&1)
+# High context — no suggestion (bridge keyed by session_id)
+echo "60" > "$CTX_DIR/test-stop-sess"
+OUTPUT=$(echo '{"session_id":"test-stop-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/stop-check.sh" 2>&1)
 assert_eq "60% remaining: no suggestion" "" "$OUTPUT"
 
 # Low context — suggest clear
-echo "30" > "$CTX_DIR/$HASH"
-OUTPUT=$(echo '{"cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/stop-check.sh" 2>&1)
+echo "30" > "$CTX_DIR/test-stop-sess"
+OUTPUT=$(echo '{"session_id":"test-stop-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/stop-check.sh" 2>&1)
 assert_match "30% remaining: suggests /clear" "/clear" "$OUTPUT"
 
 # Cleanup
-rm -f "$CTX_DIR/$HASH"
+rm -f "$CTX_DIR/test-stop-sess"
 rm -rf "$TEST_CWD"
 
 # ── handoff-path.sh ──────────────────────────────────────────────

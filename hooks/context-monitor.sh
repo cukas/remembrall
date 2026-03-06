@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # UserPromptSubmit hook: monitors actual context % via status-line bridge
-# Triggers journal checkpoint at 60%, warning at 30%, urgent at 20%
+# Triggers journal checkpoint at 60%, plan mode at 30%, urgent plan mode at 20%
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"
@@ -73,11 +73,7 @@ EOF
   exit 0
 fi
 
-# Handoff directory (escaped for safe JSON embedding)
-HANDOFF_DIR=$(remembrall_handoff_dir "$CWD") || exit 0
-ESCAPED_DIR=$(remembrall_escape_json "$HANDOFF_DIR")
-
-# <=20% — URGENT (only suppress if urgent already sent; allows escalation from warning)
+# <=20% — URGENT: enter plan mode immediately
 if remembrall_le "$REMAINING" 20; then
   if [ "$LAST_NUDGE" = "urgent" ]; then
     exit 0
@@ -86,13 +82,13 @@ if remembrall_le "$REMAINING" 20; then
   GAUGE=$(remembrall_gauge "$REMAINING")
   cat << EOF
 {
-  "additionalContext": "${GAUGE} Context critically low (${REMAINING}% remaining${ESTIMATED}): Please run /handoff to save progress to handoff-${SESSION_ID}.md in ${ESCAPED_DIR}/, then suggest the user /clear and /replay to continue with full context."
+  "additionalContext": "${GAUGE} Context critically low (${REMAINING}% remaining${ESTIMATED}). IMMEDIATELY write a continuation plan and call EnterPlanMode. The plan MUST include:\n- **Task:** what was requested\n- **Completed:** what is done (with file paths)\n- **Remaining:** what still needs to happen (priority-ordered)\n- **Key Decisions:** choices made and why\n- **Files Modified:** list of changed files\n- **Git Branch:** current branch and commit\n- **Blockers/Context:** errors, gotchas, user preferences\n\nOnce in plan mode the user can pick 'Yes, clear context' to get a fresh start with the plan preserved. This is faster and smoother than /handoff + /clear + /replay."
 }
 EOF
   exit 0
 fi
 
-# <=30% — WARNING (only suppress if warning already sent)
+# <=30% — WARNING: suggest plan mode for seamless context refresh
 if [ "$LAST_NUDGE" = "warning" ]; then
   exit 0
 fi
@@ -100,7 +96,7 @@ echo "warning" > "$NUDGE_FILE"
 GAUGE=$(remembrall_gauge "$REMAINING")
 cat << EOF
 {
-  "additionalContext": "${GAUGE} Context getting low (${REMAINING}% remaining${ESTIMATED}): Please run /handoff to preserve progress to handoff-${SESSION_ID}.md in ${ESCAPED_DIR}/. After saving, suggest the user /clear and /replay to continue with full context."
+  "additionalContext": "${GAUGE} Context getting low (${REMAINING}% remaining${ESTIMATED}). Write a detailed continuation plan capturing: task overview, completed work, remaining tasks (priority-ordered), key decisions, modified files with paths, current git branch, and any blockers. Then call EnterPlanMode so the user sees the 'Yes, clear context' option for a fresh start with the plan preserved. This replaces the old /handoff + /clear + /replay workflow — one step instead of three."
 }
 EOF
 exit 0
