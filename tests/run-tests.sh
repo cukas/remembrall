@@ -69,6 +69,8 @@ cleanup() {
   rm -f /tmp/claude-context-pct/test-sess 2>/dev/null
   rm -f /tmp/claude-context-pct/test-stop-sess 2>/dev/null
   rm -f /tmp/remembrall-nudges/test-sess 2>/dev/null
+  rm -f /tmp/remembrall-nudges/test-auto-sess 2>/dev/null
+  rm -f /tmp/remembrall-autonomous/test-auto-sess 2>/dev/null
   rm -f /tmp/remembrall-sessions/$(remembrall_md5 "/tmp/test-bridge-project" 2>/dev/null) 2>/dev/null
   true
 }
@@ -454,6 +456,77 @@ assert_eq "nudge file cleaned after reset" "cleaned" "$R"
 rm -f "$CTX_DIR/test-sess"
 rm -rf "$TEST_CWD"
 rm -f "/tmp/remembrall-nudges/test-sess"
+
+# ── context-monitor.sh (autonomous mode) ─────────────────────────
+echo ""
+echo "context-monitor.sh (autonomous mode):"
+
+CTX_DIR="/tmp/claude-context-pct"
+mkdir -p "$CTX_DIR"
+TEST_CWD="/tmp/remembrall-test-auto-$$"
+mkdir -p "$TEST_CWD"
+
+# Set autonomous mode for this session
+remembrall_set_autonomous "test-auto-sess" "ralph-loop"
+R=$(remembrall_is_autonomous "test-auto-sess") && STATUS=0 || STATUS=1
+assert_eq "autonomous mode set" "0" "$STATUS"
+assert_eq "autonomous skill name" "ralph-loop" "$R"
+
+# 25% in autonomous mode — should suggest /handoff, NOT EnterPlanMode
+echo "25" > "$CTX_DIR/test-auto-sess"
+rm -f "/tmp/remembrall-nudges/test-auto-sess"
+OUTPUT=$(echo '{"session_id":"test-auto-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
+assert_match "25% autonomous: mentions AUTONOMOUS MODE" "AUTONOMOUS MODE" "$OUTPUT"
+assert_match "25% autonomous: mentions /handoff" "/handoff" "$OUTPUT"
+assert_match "25% autonomous: mentions ralph-loop" "ralph-loop" "$OUTPUT"
+# Must NOT mention EnterPlanMode
+if echo "$OUTPUT" | grep -q "EnterPlanMode"; then
+  printf "${RED}  FAIL${RESET} 25%% autonomous: must NOT mention EnterPlanMode\n"
+  FAIL=$((FAIL + 1))
+else
+  printf "${GREEN}  PASS${RESET} 25%% autonomous: does not mention EnterPlanMode\n"
+  PASS=$((PASS + 1))
+fi
+
+# 15% in autonomous mode — urgent, same autonomous path
+echo "15" > "$CTX_DIR/test-auto-sess"
+OUTPUT=$(echo '{"session_id":"test-auto-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
+assert_match "15% autonomous urgent: mentions AUTONOMOUS MODE" "AUTONOMOUS MODE" "$OUTPUT"
+assert_match "15% autonomous urgent: says IMMEDIATELY" "IMMEDIATELY" "$OUTPUT"
+if echo "$OUTPUT" | grep -q "EnterPlanMode"; then
+  printf "${RED}  FAIL${RESET} 15%% autonomous urgent: must NOT mention EnterPlanMode\n"
+  FAIL=$((FAIL + 1))
+else
+  printf "${GREEN}  PASS${RESET} 15%% autonomous urgent: does not mention EnterPlanMode\n"
+  PASS=$((PASS + 1))
+fi
+
+# Clear autonomous mode
+remembrall_clear_autonomous "test-auto-sess"
+R=$(remembrall_is_autonomous "test-auto-sess") && STATUS=0 || STATUS=1
+assert_eq "autonomous mode cleared" "1" "$STATUS"
+
+# Config-based autonomous mode (no marker file needed)
+remembrall_clear_autonomous "test-auto-cfg"
+rm -f "/tmp/remembrall-nudges/test-auto-cfg"
+remembrall_config_set "autonomous_mode" "true"
+echo "25" > "$CTX_DIR/test-auto-cfg"
+OUTPUT=$(echo '{"session_id":"test-auto-cfg","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
+assert_match "25% config autonomous: mentions AUTONOMOUS MODE" "AUTONOMOUS MODE" "$OUTPUT"
+assert_match "25% config autonomous: mentions config" "config" "$OUTPUT"
+if echo "$OUTPUT" | grep -q "EnterPlanMode"; then
+  printf "${RED}  FAIL${RESET} 25%% config autonomous: must NOT mention EnterPlanMode\n"
+  FAIL=$((FAIL + 1))
+else
+  printf "${GREEN}  PASS${RESET} 25%% config autonomous: does not mention EnterPlanMode\n"
+  PASS=$((PASS + 1))
+fi
+remembrall_config_set "autonomous_mode" "false"
+
+# Cleanup
+rm -f "$CTX_DIR/test-auto-sess" "$CTX_DIR/test-auto-cfg"
+rm -rf "$TEST_CWD"
+rm -f "/tmp/remembrall-nudges/test-auto-sess" "/tmp/remembrall-nudges/test-auto-cfg"
 
 # ── session-resume.sh ─────────────────────────────────────────────
 echo ""

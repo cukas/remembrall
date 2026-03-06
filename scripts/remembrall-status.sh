@@ -88,6 +88,24 @@ else
   echo "Patches:  None"
 fi
 
+# Autonomous mode
+AUTO_MODE=$(remembrall_config "autonomous_mode" "false")
+echo "Auto:     $AUTO_MODE"
+
+# Calibration
+CAL_FILE="$HOME/.remembrall/calibration.json"
+if [ -f "$CAL_FILE" ]; then
+  CAL_MAX=$(remembrall_calibrated_max)
+  CAL_SAMPLES=$(jq '.samples | length' "$CAL_FILE" 2>/dev/null || echo 0)
+  if [ -n "$CAL_MAX" ] && [ "$CAL_MAX" -gt 0 ] 2>/dev/null; then
+    echo "Calibr:   ${CAL_MAX} bytes (~$((CAL_MAX / 1024))KB) from $CAL_SAMPLES sample(s)"
+  else
+    echo "Calibr:   No data yet"
+  fi
+else
+  echo "Calibr:   Not calibrated (using default 256KB)"
+fi
+
 # Team handoffs
 TEAM_DIR="$CWD/.remembrall/handoffs"
 if [ -d "$TEAM_DIR" ]; then

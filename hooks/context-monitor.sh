@@ -73,30 +73,61 @@ EOF
   exit 0
 fi
 
-# <=20% — URGENT: enter plan mode immediately
+# ── Detect autonomous mode (ralph loop, swarms, etc.) ──
+# Two triggers: config setting (global) or marker file (per-session from skill)
+IS_AUTONOMOUS=false
+AUTONOMOUS_SKILL=""
+if [ "$(remembrall_config "autonomous_mode" "false")" = "true" ]; then
+  IS_AUTONOMOUS=true
+  AUTONOMOUS_SKILL="config"
+fi
+if [ "$IS_AUTONOMOUS" = false ]; then
+  AUTONOMOUS_SKILL=$(remembrall_is_autonomous "$SESSION_ID" 2>/dev/null) && IS_AUTONOMOUS=true || true
+fi
+
+# ── Plan content template (shared between warning and urgent) ──
+PLAN_ITEMS="task overview, completed work, remaining tasks (priority-ordered), key decisions, modified files with paths, current git branch, a prescriptive 'Resume With' section (the next session MUST invoke this — e.g. 'invoke /ralph-loop resume iteration N', 'invoke /test-driven-development next test: X', 'dispatch 3 parallel agents for A,B,C', 'invoke /systematic-debugging hypothesis: X', or 'standard sequential'), tools/agents in use (MCP servers, active skills with / prefix so they can be re-invoked, agent-specific state), and any blockers"
+
+# <=20% — URGENT
 if remembrall_le "$REMAINING" 20; then
   if [ "$LAST_NUDGE" = "urgent" ]; then
     exit 0
   fi
   echo "urgent" > "$NUDGE_FILE"
   GAUGE=$(remembrall_gauge "$REMAINING")
-  cat << EOF
+  if [ "$IS_AUTONOMOUS" = true ]; then
+    cat << EOF
+{
+  "additionalContext": "${GAUGE} Context critically low (${REMAINING}% remaining${ESTIMATED}). AUTONOMOUS MODE (${AUTONOMOUS_SKILL}) — No human present — skip plan mode. Instead: IMMEDIATELY run /handoff to save full state. Include ${PLAN_ITEMS}. After handoff completes, continue working — auto-compaction will handle context recycling and session-resume will reload the handoff automatically. Do NOT stop or ask the user."
+}
+EOF
+  else
+    cat << EOF
 {
   "additionalContext": "${GAUGE} Context critically low (${REMAINING}% remaining${ESTIMATED}). IMMEDIATELY write a continuation plan and call EnterPlanMode. The plan MUST include:\n- **Task:** what was requested\n- **Completed:** what is done (with file paths)\n- **Remaining:** what still needs to happen (priority-ordered)\n- **Key Decisions:** choices made and why\n- **Files Modified:** list of changed files\n- **Git Branch:** current branch and commit\n- **Resume With:** (PRESCRIPTIVE — the next session MUST invoke this) which methodology to continue with and how to start it. Examples: 'Invoke /ralph-loop and resume iteration N', 'Invoke /test-driven-development — next test to write: [X]', 'Dispatch 3 parallel agents for tasks [A, B, C]', 'Invoke /systematic-debugging — current hypothesis: [X]', 'Standard sequential — just continue the task list'. If agents were running, list their tasks and whether results are pending.\n- **Tools/Agents:** MCP servers in use, active skills invoked this session, any agent-specific config or state that must carry over. List skill names with / prefix so they can be re-invoked.\n- **Blockers/Context:** errors, gotchas, user preferences\n\nOnce in plan mode the user can pick 'Yes, clear context' to get a fresh start with the plan preserved. This is faster and smoother than /handoff + /clear + /replay."
 }
 EOF
+  fi
   exit 0
 fi
 
-# <=30% — WARNING: suggest plan mode for seamless context refresh
+# <=30% — WARNING
 if [ "$LAST_NUDGE" = "warning" ]; then
   exit 0
 fi
 echo "warning" > "$NUDGE_FILE"
 GAUGE=$(remembrall_gauge "$REMAINING")
-cat << EOF
+if [ "$IS_AUTONOMOUS" = true ]; then
+  cat << EOF
 {
-  "additionalContext": "${GAUGE} Context getting low (${REMAINING}% remaining${ESTIMATED}). Write a detailed continuation plan capturing: task overview, completed work, remaining tasks (priority-ordered), key decisions, modified files with paths, current git branch, a prescriptive 'Resume With' section (the next session MUST invoke this — e.g. 'invoke /ralph-loop resume iteration N', 'invoke /test-driven-development next test: X', 'dispatch 3 parallel agents for A,B,C', 'invoke /systematic-debugging hypothesis: X', or 'standard sequential'), tools/agents in use (MCP servers, active skills with / prefix so they can be re-invoked, agent-specific state), and any blockers. Then call EnterPlanMode so the user sees the 'Yes, clear context' option for a fresh start with the plan preserved. This replaces the old /handoff + /clear + /replay workflow — one step instead of three."
+  "additionalContext": "${GAUGE} Context getting low (${REMAINING}% remaining${ESTIMATED}). AUTONOMOUS MODE (${AUTONOMOUS_SKILL}) — No human present — skip plan mode. Instead: run /handoff now to save a progress snapshot with ${PLAN_ITEMS}. Then continue working normally — auto-compaction and session-resume will handle context recycling automatically. Do NOT stop or ask the user."
 }
 EOF
+else
+  cat << EOF
+{
+  "additionalContext": "${GAUGE} Context getting low (${REMAINING}% remaining${ESTIMATED}). Write a detailed continuation plan capturing: ${PLAN_ITEMS}. Then call EnterPlanMode so the user sees the 'Yes, clear context' option for a fresh start with the plan preserved. This replaces the old /handoff + /clear + /replay workflow — one step instead of three."
+}
+EOF
+fi
 exit 0

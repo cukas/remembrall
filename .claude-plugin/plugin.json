@@ -1,7 +1,7 @@
 {
   "name": "remembrall",
-  "description": "Context handoff system for Claude Code — session journals, git patch snapshots, team handoffs, smart replay with state verification, and auto-resume on compaction/clear",
-  "version": "2.0.0",
+  "description": "Context-aware session continuity for Claude Code — plan mode at low context, autonomous overnight runs, session journals, git patch snapshots, team handoffs, smart replay, and auto-resume",
+  "version": "2.1.0",
   "author": {
     "name": "cukas"
   },

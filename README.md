@@ -1,6 +1,6 @@
 # Remembrall
 
-*"It glows when you've forgotten something" — like your entire context window."*
+*"It glows when you've forgotten something" — like your entire context window.*
 
 **Context runs out → work gets lost.** Remembrall fixes that.
 
@@ -58,60 +58,68 @@ Remembrall monitors your context window in real-time, keeps a running session jo
 > **Zero-setup by default.** Remembrall works out of the box using self-calibrating transcript estimation. After 1-2 sessions, the estimator learns your typical context window size and triggers accurately. For maximum precision, you can optionally run `/setup-remembrall` to set up the status-line bridge — but it's not required.
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        Claude Code Session                       │
-│                                                                  │
-│  Status Line ──writes──> /tmp/claude-context-pct/{session_id}    │
-│       │                          │                               │
-│       │                   context-monitor.sh                     │
-│       │                   (UserPromptSubmit)                     │
-│       │                          │                               │
-│       │              bridge found? ──┐── no?                     │
-│       │                  │           │    │                      │
-│       │              use bridge   estimate from                  │
-│       │                  │        transcript size                │
-│       │                  ▼           ▼                           │
-│       │               >60%? ── do nothing (silent)               │
-│       │                  │                                       │
-│       │              <=60%? ── "journal" checkpoint nudge         │
-│       │                  │                                       │
-│       │              <=30%? ── Claude writes continuation plan    │
-│       │                  │     (task, files, decisions,          │
-│       │                  │      "Resume With" methodology,       │
-│       │                  │      active tools/agents/skills)      │
-│       │                  │     + calls EnterPlanMode             │
-│       │                  │                                       │
-│       │              <=20%? ── same, but IMMEDIATELY             │
-│       │                  │                                       │
-│       │                  ▼                                       │
-│       │            Plan mode UI appears:                         │
-│       │            "Yes, clear context (30% used)"               │
-│       │            User picks option 1 → fresh context           │
-│       │            with plan preserved                           │
-│       │                          │                               │
-│  ─── task complete ──────────────┤                               │
-│       │                          │                               │
-│  stop-check.sh (Stop hook)       │                               │
-│  (suggests /clear if <40%)       │                               │
-│       │                          │                               │
-│  ─── compaction ─────────────────┤                               │
-│       │                          │                               │
-│  precompact-handoff.sh           │                               │
-│  (safety net — auto-generates    │                               │
-│   handoff from transcript        │                               │
-│   + git patch snapshot)          │                               │
-│       │                          │                               │
-│       ▼                          │                               │
-│  ~/.remembrall/handoffs/{hash}/handoff-{session}.md              │
-│  ~/.remembrall/patches/{hash}/patch-{session}.diff               │
-│       │                          │                               │
-│  session-resume.sh               │                               │
-│  (SessionStart — injects         │                               │
-│   handoff as additionalContext)   │                               │
-│       │                          │                               │
-│       ▼                          │                               │
-│  Claude resumes with full context                                │
-└─────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│                         Claude Code Session                          │
+│                                                                      │
+│  Status Line ──writes──> /tmp/claude-context-pct/{session_id}        │
+│       │                          │                                   │
+│       │                   context-monitor.sh                         │
+│       │                   (UserPromptSubmit)                         │
+│       │                          │                                   │
+│       │              bridge found? ──┐── no?                         │
+│       │                  │           │    │                          │
+│       │              use bridge   estimate from                      │
+│       │                  │        transcript size                    │
+│       │                  ▼           ▼                               │
+│       │               >60%? ── do nothing (silent)                   │
+│       │                  │                                           │
+│       │              <=60%? ── "journal" checkpoint nudge             │
+│       │                  │                                           │
+│       │              <=30%? ── autonomous mode?                       │
+│       │                  │         │                                 │
+│       │                  │    ┌────┴────┐                            │
+│       │                  │    no        yes                          │
+│       │                  │    │         │                            │
+│       │                  │    │    /handoff + continue               │
+│       │                  │    │    (auto-compaction recycles)        │
+│       │                  │    │                                      │
+│       │                  │    Claude writes continuation plan        │
+│       │                  │    (task, files, decisions,               │
+│       │                  │     "Resume With" methodology,            │
+│       │                  │     active tools/agents/skills)           │
+│       │                  │    + calls EnterPlanMode                  │
+│       │                  │         │                                 │
+│       │              <=20%? ── same, but IMMEDIATELY                 │
+│       │                  │                                           │
+│       │                  ▼                                           │
+│       │            Plan mode UI appears:                             │
+│       │            "Yes, clear context"                              │
+│       │            User clicks → fresh context                       │
+│       │            with plan preserved                               │
+│       │                          │                                   │
+│  ─── task complete ──────────────┤                                   │
+│       │                          │                                   │
+│  stop-check.sh (Stop hook)       │                                   │
+│  (suggests /clear if <40%)       │                                   │
+│       │                          │                                   │
+│  ─── compaction ─────────────────┤                                   │
+│       │                          │                                   │
+│  precompact-handoff.sh           │                                   │
+│  (safety net — auto-generates    │                                   │
+│   handoff from transcript        │                                   │
+│   + git patch snapshot)          │                                   │
+│       │                          │                                   │
+│       ▼                          │                                   │
+│  ~/.remembrall/handoffs/{hash}/handoff-{session}.md                  │
+│  ~/.remembrall/patches/{hash}/patch-{session}.diff                   │
+│       │                          │                                   │
+│  session-resume.sh               │                                   │
+│  (SessionStart — injects         │                                   │
+│   handoff as additionalContext)   │                                   │
+│       │                          │                                   │
+│       ▼                          │                                   │
+│  Claude resumes with full context                                    │
+└──────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Five Layers of Protection
@@ -156,6 +164,7 @@ Remembrall uses `~/.remembrall/config.json` for persistent settings. Run `/setup
 {
   "git_integration": true,
   "team_handoffs": false,
+  "autonomous_mode": false,
   "retention_hours": 72,
   "max_transcript_kb": 256
 }
@@ -165,6 +174,7 @@ Remembrall uses `~/.remembrall/config.json` for persistent settings. Run `/setup
 |---------|---------|-------------|
 | `git_integration` | `false` | Save git patches of session-touched files before handoff |
 | `team_handoffs` | `false` | Copy handoffs to project-local `.remembrall/handoffs/` |
+| `autonomous_mode` | `false` | Skip plan mode (no human click needed) — use `/handoff` + auto-compaction instead. Enable for overnight/unattended runs. |
 | `retention_hours` | `72` | Hours to keep handoff files before auto-cleanup |
 | `max_transcript_kb` | `256` | Expected max transcript size in KB (for fallback context estimation) |
 
@@ -221,6 +231,8 @@ chmod +x hooks/*.sh scripts/*.sh
 |---------|-------------|
 | `/setup-remembrall` | One-time bridge and config setup helper |
 | `/remembrall-status` | Diagnostic: check context %, bridge, handoffs |
+| `/remembrall-help` | List all commands, skills, and config options |
+| `/autonomous` | Toggle autonomous mode on/off for overnight runs |
 
 ## Skills
 

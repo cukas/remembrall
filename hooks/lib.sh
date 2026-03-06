@@ -379,6 +379,48 @@ remembrall_read_session_id() {
   [ -f "$f" ] && cat "$f" 2>/dev/null
 }
 
+# ─── Autonomous Mode ─────────────────────────────────────────────
+
+# Autonomous mode marker — set by skills that run unattended (ralph loop,
+# swarm agents, etc.) so Remembrall uses the automatic path (handoff +
+# compaction) instead of plan mode (which needs a human click).
+#
+# Any skill can signal autonomous mode:
+#   remembrall_set_autonomous "$SESSION_ID" "ralph-loop"
+#
+# The marker is checked by context-monitor.sh at <=30% to decide:
+#   autonomous → write /handoff (automatic, no human needed)
+#   attended   → EnterPlanMode (human clicks "clear context")
+
+REMEMBRALL_AUTONOMOUS_DIR="/tmp/remembrall-autonomous"
+
+remembrall_set_autonomous() {
+  local session_id="$1"
+  local skill_name="${2:-unknown}"
+  [ -z "$session_id" ] && return
+  mkdir -p "$REMEMBRALL_AUTONOMOUS_DIR" 2>/dev/null
+  printf '%s' "$skill_name" > "$REMEMBRALL_AUTONOMOUS_DIR/$session_id" 2>/dev/null
+}
+
+remembrall_clear_autonomous() {
+  local session_id="$1"
+  [ -z "$session_id" ] && return
+  rm -f "$REMEMBRALL_AUTONOMOUS_DIR/$session_id" 2>/dev/null
+}
+
+# Returns 0 (true) if autonomous, 1 (false) if attended.
+# Outputs the skill name on stdout if autonomous.
+remembrall_is_autonomous() {
+  local session_id="$1"
+  [ -z "$session_id" ] && return 1
+  local f="$REMEMBRALL_AUTONOMOUS_DIR/$session_id"
+  if [ -f "$f" ]; then
+    cat "$f" 2>/dev/null
+    return 0
+  fi
+  return 1
+}
+
 # ─── Handoff Chains ──────────────────────────────────────────────
 
 # Find the most recent handoff session_id for chaining.

@@ -9,7 +9,7 @@ Remembrall needs a small bridge in your Claude Code status line to feed context 
 
 ## What the Bridge Does
 
-Your status line already has access to `$remaining` (context window % remaining), `$cwd` (current working directory), and `$session_id`. The bridge writes `$remaining` to a file in `/tmp/claude-context-pct/` named `{md5-of-cwd}-{session_id}`. This ensures multiple Claude instances on the same project each get their own bridge file.
+Your status line already has access to `$remaining` (context window % remaining) and `$session_id`. The bridge writes `$remaining` to a file in `/tmp/claude-context-pct/` named by `session_id`. Each Claude session gets its own bridge file.
 
 ## Steps
 
