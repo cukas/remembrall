@@ -8,6 +8,7 @@ source "$SCRIPT_DIR/lib.sh"
 remembrall_require_jq
 
 INPUT=$(cat)
+SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty')
 CWD=$(echo "$INPUT" | jq -r '.cwd // empty')
 TRANSCRIPT_PATH=$(echo "$INPUT" | jq -r '.transcript_path // empty')
 STOP_HOOK_ACTIVE=$(echo "$INPUT" | jq -r '.stop_hook_active // false')
@@ -24,7 +25,7 @@ fi
 # Try bridge first, then transcript fallback
 REMAINING=""
 ESTIMATED=""
-CTX_FILE=$(remembrall_find_bridge "$CWD") 2>/dev/null
+CTX_FILE=$(remembrall_find_bridge "$CWD" "$SESSION_ID") 2>/dev/null
 if [ -n "$CTX_FILE" ]; then
   REMAINING=$(cat "$CTX_FILE" 2>/dev/null)
   if ! remembrall_validate_number "$REMAINING"; then
