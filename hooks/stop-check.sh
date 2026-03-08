@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Stop hook: enforce handoff save when context is low, suggest /clear + /replay otherwise.
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"
@@ -45,10 +46,12 @@ fi
 # Check if a handoff already exists for this session
 HANDOFF_EXISTS=false
 if [ -n "$SESSION_ID" ] && [ -n "$CWD" ]; then
-  HASH=$(remembrall_md5 "$CWD")
-  HANDOFF_FILE="$HOME/.remembrall/handoffs/$HASH/handoff-${SESSION_ID}.md"
-  if [ -f "$HANDOFF_FILE" ]; then
-    HANDOFF_EXISTS=true
+  HASH=$(remembrall_md5 "$CWD") || true
+  if [ -n "$HASH" ]; then
+    HANDOFF_FILE="$HOME/.remembrall/handoffs/$HASH/handoff-${SESSION_ID}.md"
+    if [ -f "$HANDOFF_FILE" ]; then
+      HANDOFF_EXISTS=true
+    fi
   fi
 fi
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # PreCompact hook: safety-net handoff before context compaction
 # Extracts structured info from transcript, writes per-session handoff file
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"
@@ -48,7 +49,7 @@ if [ -f "$HANDOFF_FILE" ]; then
   fi
   # Never overwrite a skill-generated handoff — it is higher quality.
   # Auto-generated handoffs have type: auto-generated in frontmatter.
-  existing_type=$(remembrall_frontmatter_get "$HANDOFF_FILE" "type" 2>/dev/null)
+  existing_type=$(remembrall_frontmatter_get "$HANDOFF_FILE" "type" 2>/dev/null || true)
   if [ "$existing_type" != "auto-generated" ]; then
     echo "Handoff exists and was skill-generated. Preserving." >&2
     exit 0
@@ -100,10 +101,10 @@ EXTRACTED=$(jq -r '
 ' "$TRANSCRIPT_PATH" 2>/dev/null)
 
 # Split extracted data by prefix
-FILE_PATHS=$(echo "$EXTRACTED" | grep '^FILE:' | sed 's/^FILE://' | sort -u | head -50)
-ERRORS_FOUND=$(echo "$EXTRACTED" | grep '^ERROR:' | sed 's/^ERROR://' | tail -10 | sort -u | tail -5)
-GIT_OPS=$(echo "$EXTRACTED" | grep '^GIT:' | sed 's/^GIT://' | tail -20)
-TASK_STATE=$(echo "$EXTRACTED" | grep '^TASK:' | sed 's/^TASK://' | tail -30)
+FILE_PATHS=$(echo "$EXTRACTED" | grep '^FILE:' | sed 's/^FILE://' | sort -u | head -50 || true)
+ERRORS_FOUND=$(echo "$EXTRACTED" | grep '^ERROR:' | sed 's/^ERROR://' | tail -10 | sort -u | tail -5 || true)
+GIT_OPS=$(echo "$EXTRACTED" | grep '^GIT:' | sed 's/^GIT://' | tail -20 || true)
+TASK_STATE=$(echo "$EXTRACTED" | grep '^TASK:' | sed 's/^TASK://' | tail -30 || true)
 
 # Extract the user's first substantive message as the session goal
 USER_GOAL=$(jq -r '
@@ -116,7 +117,7 @@ USER_GOAL=$(jq -r '
   end |
   select(length > 10) |
   .[0:500]
-' "$TRANSCRIPT_PATH" 2>/dev/null | head -1)
+' "$TRANSCRIPT_PATH" 2>/dev/null | head -1 || true)
 
 # ─── Git state capture ────────────────────────────────────────────
 BRANCH=""
@@ -147,7 +148,7 @@ if remembrall_git_enabled "$CWD"; then
 fi
 
 # Build JSON files array
-FILES_JSON=$(printf '%s\n' "$FILE_PATHS" | grep -v '^$' | head -50 | jq -R . | jq -s '.')
+FILES_JSON=$(printf '%s\n' "$FILE_PATHS" | grep -v '^$' | head -50 | jq -R . | jq -s '.' || echo '[]')
 
 # Determine team mode
 TEAM_MODE=$(remembrall_config "team_handoffs" "false")
