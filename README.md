@@ -143,7 +143,11 @@ Remembrall uses `~/.remembrall/config.json` for persistent settings. Run `/setup
   "team_handoffs": false,
   "autonomous_mode": false,
   "retention_hours": 72,
-  "easter_eggs": true
+  "easter_eggs": true,
+  "threshold_journal": 60,
+  "threshold_warning": 30,
+  "threshold_urgent": 20,
+  "debug": false
 }
 ```
 
@@ -330,7 +334,7 @@ You're walking Claude through a complex codebase architecture so it can help new
 
 ## FAQ
 
-**Does Remembrall bloat my context?** No. It injects one handoff document on session resume (then deletes it). During a session, nudges are short one-line messages injected via `additionalContext` — each fires at most once per threshold (60%, 30%, 20%), so the total overhead is minimal. There is no accumulated memory that grows over time.
+**Does Remembrall bloat my context?** No. It injects one handoff document on session resume (then deletes it). During a session, nudges are short one-line messages injected via `additionalContext` — each fires at most once per threshold (configurable, defaults: 60%, 30%, 20%), so the total overhead is minimal. There is no accumulated memory that grows over time.
 
 **Hooks don't seem to be running** — Check `jq --version` and `chmod +x hooks/*.sh`. See Troubleshooting section above.
 
