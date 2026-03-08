@@ -1,5 +1,7 @@
 # Remembrall
 
+[![CI](https://github.com/cukas/remembrall/actions/workflows/ci.yml/badge.svg)](https://github.com/cukas/remembrall/actions)
+
 *"It glows when you've forgotten something" — like your entire context window.*
 
 <p align="center">
