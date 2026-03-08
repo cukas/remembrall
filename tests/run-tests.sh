@@ -1506,7 +1506,7 @@ else
 fi
 
 # Check log format includes timestamp and hook name
-if grep -qE '^\d{4}-\d{2}-\d{2}T' "$HOME/.remembrall/debug.log" 2>/dev/null; then
+if grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T' "$HOME/.remembrall/debug.log" 2>/dev/null; then
   printf "${GREEN}  PASS${RESET} debug log has ISO timestamp\n"
   PASS=$((PASS + 1))
 else
