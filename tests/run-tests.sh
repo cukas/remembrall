@@ -1259,6 +1259,84 @@ remembrall_clear_autonomous "test-esc-sess"
 rm -f "$CTX_DIR/test-esc-sess" "/tmp/remembrall-nudges/test-esc-sess"
 rm -rf "$TEST_CWD_ESC"
 
+# ── session-resume.sh (growth file cleanup) ───────────────────────
+echo ""
+echo "session-resume.sh (growth file cleanup):"
+
+GROWTH_DIR="/tmp/remembrall-growth"
+mkdir -p "$GROWTH_DIR"
+echo "100000" > "$GROWTH_DIR/test-growth-cleanup-sess"
+
+TEST_CWD_GC="$TMPDIR_ROOT/growth-cleanup-test"
+mkdir -p "$TEST_CWD_GC"
+
+GC_HANDOFF_DIR=$(remembrall_handoff_dir "$TEST_CWD_GC")
+mkdir -p "$GC_HANDOFF_DIR"
+cat > "$GC_HANDOFF_DIR/handoff-test-growth-cleanup-sess.md" << 'GC_HANDOFF'
+---
+{
+  "created": "2026-03-08T10:00:00Z",
+  "session_id": "test-growth-cleanup-sess",
+  "project": "/tmp/test",
+  "status": "in_progress"
+}
+---
+
+# Test handoff for growth cleanup
+GC_HANDOFF
+
+echo '{"source":"compact","session_id":"test-growth-cleanup-sess","cwd":"'"$TEST_CWD_GC"'"}' | \
+  bash "$PLUGIN_ROOT/hooks/session-resume.sh" 2>/dev/null
+
+if [ -f "$GROWTH_DIR/test-growth-cleanup-sess" ]; then
+  printf "${RED}  FAIL${RESET} growth file cleaned up on session resume\n"
+  FAIL=$((FAIL + 1))
+else
+  printf "${GREEN}  PASS${RESET} growth file cleaned up on session resume\n"
+  PASS=$((PASS + 1))
+fi
+
+rm -rf "$TEST_CWD_GC"
+
+# ── session-resume.sh (bridge injection with pipes in existing command) ──
+echo ""
+echo "session-resume.sh (bridge injection with pipes in existing command):"
+
+SETTINGS_FILE="$HOME/.claude/settings.json"
+mkdir -p "$HOME/.claude"
+
+cat > "$SETTINGS_FILE" << 'PIPE_SETTINGS'
+{
+  "statusLine": {
+    "command": "input=$(cat); remaining=$(echo \"$input\" | jq -r '.context_remaining // empty'); status=\"ctx: ${remaining:-?}%\"; echo \"$status\""
+  }
+}
+PIPE_SETTINGS
+
+TEST_CWD_PIPE="$TMPDIR_ROOT/pipe-bridge-test"
+mkdir -p "$TEST_CWD_PIPE"
+
+echo '{"source":"fresh","session_id":"test-pipe-bridge","cwd":"'"$TEST_CWD_PIPE"'"}' | \
+  bash "$PLUGIN_ROOT/hooks/session-resume.sh" 2>/dev/null
+
+if jq . "$SETTINGS_FILE" >/dev/null 2>&1; then
+  printf "${GREEN}  PASS${RESET} settings.json valid JSON after bridge injection with pipes\n"
+  PASS=$((PASS + 1))
+else
+  printf "${RED}  FAIL${RESET} settings.json valid JSON after bridge injection with pipes\n"
+  FAIL=$((FAIL + 1))
+fi
+
+if grep -q "claude-context-pct" "$SETTINGS_FILE" 2>/dev/null; then
+  printf "${GREEN}  PASS${RESET} bridge snippet present after injection with pipes\n"
+  PASS=$((PASS + 1))
+else
+  printf "${RED}  FAIL${RESET} bridge snippet present after injection with pipes\n"
+  FAIL=$((FAIL + 1))
+fi
+
+rm -rf "$TEST_CWD_PIPE"
+
 # ═══════════════════════════════════════════════════════════════════
 echo ""
 echo "─────────────────"

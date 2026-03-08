@@ -58,27 +58,15 @@ _remembrall_ensure_bridge() {
   # Build the bridge snippet
   local bridge_snippet
   if [ "$has_session_id" = true ]; then
-    # session_id already extracted — just add bridge write
     bridge_snippet='CTX_DIR="/tmp/claude-context-pct"; mkdir -p "$CTX_DIR" 2>/dev/null; printf "%s" "$remaining" > "$CTX_DIR/${session_id}" 2>/dev/null;'
   else
-    # Need to also extract session_id
     bridge_snippet='session_id=$(echo "$input" | jq -r '"'"'.session_id // empty'"'"'); CTX_DIR="/tmp/claude-context-pct"; mkdir -p "$CTX_DIR" 2>/dev/null; printf "%s" "$remaining" > "$CTX_DIR/${session_id}" 2>/dev/null;'
   fi
 
-  # Find the insertion point: end of the 'if [ -n "$remaining" ]' block
-  # Strategy: append bridge snippet before the final 'fi; echo' or before 'echo "$status"'
+  # Append bridge snippet to existing command (simple, safe string concatenation)
   local new_command
   new_command=$(jq -r '.statusLine.command' "$settings_file" 2>/dev/null)
-
-  # Check if there's a remaining check block we can append to
-  if echo "$new_command" | grep -q 'remaining' 2>/dev/null; then
-    # Insert bridge before the last 'fi;' that closes the remaining block
-    # Use the pattern: find the last 'fi; echo "$status"' and insert before it
-    new_command=$(printf '%s' "$new_command" | sed "s|; echo \"\\\$status\"|; ${bridge_snippet} echo \"\\\$status\"|")
-  else
-    # No remaining block — append bridge at the end (before echo "$status")
-    new_command="${new_command}; ${bridge_snippet}"
-  fi
+  new_command="${new_command}; ${bridge_snippet}"
 
   # Write back to settings.json atomically
   local tmp
@@ -212,6 +200,7 @@ rm -f "$CLAIMED_FILE"
 # Clean up nudge temp files for this session
 if [ -n "$SESSION_ID" ]; then
   rm -f "/tmp/remembrall-nudges/$SESSION_ID"
+  rm -f "/tmp/remembrall-growth/$SESSION_ID"
 fi
 
 exit 0
