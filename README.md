@@ -10,6 +10,8 @@
 
 **Context runs out → work gets lost.** Remembrall fixes that.
 
+### Install
+
 ```bash
 claude plugin marketplace add cukas/remembrall
 claude plugin install remembrall@cukas
