@@ -37,13 +37,13 @@ Remembrall monitors your context window in real-time, keeps a running session jo
 
 ## What's New in v2
 
-- **Zero-Setup Experience** — Remembrall works out of the box with no manual configuration. The status-line bridge is auto-configured on first session, and the estimator auto-calibrates from bridge data within minutes — no compaction events needed. Every user gets accurate context tracking regardless of their plugin/skill setup.
+- **Zero-Setup Experience** — Remembrall works out of the box with no manual configuration. The status-line bridge is auto-configured on first session start, and the estimator auto-calibrates from bridge data once context usage reaches 20% — no compaction events needed. Every user gets accurate context tracking regardless of their plugin/skill setup.
 
 - **No External Dependencies** — Removed the `bc` requirement. All comparisons use integer arithmetic. Only `jq` is required (and hooks exit gracefully without it).
 
 - **Single-Script Handoff** — The `/handoff` skill now pipes content to a single `handoff-create.sh` script that handles path computation, git patches, YAML frontmatter, and team copies. More reliable than multi-step orchestration.
 
-- **Session Journal** — At 60% context remaining, Remembrall starts nudging Claude to maintain a running journal checkpoint. This keeps the handoff document up-to-date incrementally, so nothing is lost if compaction happens suddenly.
+- **Early Handoff Nudge** — At 60% context remaining, Remembrall nudges Claude to run `/handoff` and save progress. This ensures a handoff document exists before context gets critical, so nothing is lost if compaction happens suddenly.
 
 - **Git Patch Snapshots** — Before handoff, Remembrall captures uncommitted changes for session-touched files only. Patches are stored in `~/.remembrall/patches/` — your repo stays clean (no WIP commits, no stashes).
 
@@ -69,7 +69,7 @@ Remembrall monitors your context window in real-time, keeps a running session jo
 
 ## How It Works
 
-> **Zero-setup by default.** Remembrall auto-configures the status-line bridge on first session and derives per-user context limits from bridge data. No compaction events needed — the estimator calibrates within minutes of the bridge activating.
+> **Zero-setup by default.** Remembrall auto-configures the status-line bridge on first session start and derives per-user context limits from bridge data. No compaction events needed — the estimator calibrates once the session has used 20% of context.
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
@@ -138,15 +138,15 @@ Remembrall monitors your context window in real-time, keeps a running session jo
 
 ## Five Layers of Protection
 
-1. **Plan Mode Trigger** (`context-monitor.sh`) — Reads context % from a bridge file, or estimates it from transcript size as a fallback. At 30% remaining, tells Claude to write a continuation plan and call `EnterPlanMode`. The plan captures task state, files, decisions, **and a prescriptive "Resume With" section** (which skill/methodology to invoke, active agents, MCP servers). The user sees the native "Yes, clear context" option — one click for a fresh start. At 20%, the same but with urgent priority.
+1. **Plan Mode Trigger** (`context-monitor.sh`) — Reads context % from a bridge file, or estimates it from transcript size as a fallback. At 30% remaining, tells Claude to run `/handoff` and then call `EnterPlanMode`. The `/handoff` skill captures task state, files, decisions, **and a prescriptive "Resume With" section** (which skill/methodology to invoke, active agents, MCP servers). The user sees the native "Yes, clear context" option — one click for a fresh start. At 20%, the same but with urgent priority.
 
-2. **Journal Checkpoint** (`context-monitor.sh` at 60%) — Before things get urgent, Remembrall nudges Claude to update a running journal of progress. This keeps the handoff document incrementally current, so if compaction strikes between 60% and 30%, the handoff already reflects recent work.
+2. **Journal Checkpoint** (`context-monitor.sh` at 60%) — Before things get urgent, Remembrall nudges Claude to run `/handoff` to save progress. This early nudge ensures a handoff document exists before context gets critical, so if compaction strikes between 60% and 30%, the handoff already reflects recent work.
 
 3. **Safety Net** (`precompact-handoff.sh`) — If the early warning is missed and Claude auto-compacts, this hook extracts files touched, errors encountered, git operations, task state, and recent conversation from the transcript into a handoff document. Also captures git patches of session-touched files when git integration is enabled. Will not overwrite a higher-quality skill-generated handoff.
 
 4. **Auto-Resume** (`session-resume.sh`) — On session start after compaction or `/clear`, injects the handoff content directly into Claude's context so it picks up where it left off.
 
-5. **Stop Check** (`stop-check.sh`) — When Claude finishes a task, checks if context is below 40% and suggests `/clear` + `/replay` before starting new work.
+5. **Stop Check** (`stop-check.sh`) — When Claude finishes a task, checks if context is below 40%. If a handoff already exists, suggests `/clear` + `/replay` before starting new work. If no handoff exists, tells Claude to run `/handoff` first.
 
 ## Installation
 
@@ -171,7 +171,7 @@ Remembrall uses `~/.remembrall/config.json` for persistent settings. Run `/setup
 
 ```json
 {
-  "git_integration": true,
+  "git_integration": false,
   "team_handoffs": false,
   "autonomous_mode": false,
   "retention_hours": 72
@@ -190,15 +190,17 @@ Settings apply globally — once configured, all Claude sessions respect them. V
 
 ## Self-Calibrating Context Estimation
 
-Remembrall uses a multi-layer estimation strategy:
+Remembrall uses a two-branch estimation strategy:
 
-1. **Bridge truth** (most accurate) — The status-line bridge writes Claude's actual context remaining % to `/tmp/claude-context-pct/{session_id}`. Auto-configured on first session.
+**When the bridge is active** (most accurate):
 
-2. **Bridge-derived calibration** — While the bridge is active, Remembrall derives `content_max` (how many content bytes fit before context runs out) from the equation: `content_max = content_bytes / used_pct`. This auto-calibrates per user, per model — accounting for your specific overhead (plugins, skills, system prompt size). No compaction needed.
+The status-line bridge writes Claude's actual context remaining % to `/tmp/claude-context-pct/{session_id}`. Auto-configured on first session. As a side effect, Remembrall derives `content_max` (how many content bytes fit before context runs out) from the equation: `content_max = content_bytes / (used_pct / 100)`. This auto-calibrates per user, per model — accounting for your specific overhead (plugins, skills, system prompt size). Calibration samples are stored once context usage reaches 20%.
 
-3. **Structural JSONL parser** — When the bridge is stale (>120s response), falls back to parsing transcript content bytes and comparing against the bridge-derived `content_max`. Accurate because it uses calibrated limits, not hardcoded defaults.
+**When the bridge is unavailable** (fallback):
 
-4. **File-size fallback** — Last resort when structural parsing fails. Uses raw transcript size against calibrated or model-specific maximums.
+1. **Structural JSONL parser** — Parses transcript content bytes and compares against the bridge-derived `content_max` (if calibrated) or model-specific defaults. Accurate when calibration data exists from prior bridge sessions.
+
+2. **File-size fallback** — Last resort when structural parsing fails. Uses raw transcript size against calibrated or model-specific maximums.
 
 Calibration data is stored at `~/.remembrall/calibration.json` and persists across sessions. If you want to reset calibration (e.g., after changing models), delete this file.
 
@@ -245,7 +247,7 @@ chmod +x hooks/*.sh scripts/*.sh
 
 | Command | Description |
 |---------|-------------|
-| `/setup-remembrall` | One-time bridge and config setup helper |
+| `/setup-remembrall` | Manual fallback for bridge setup and config customization |
 | `/remembrall-status` | Diagnostic: check context %, bridge, handoffs |
 | `/remembrall-help` | List all commands, skills, and config options |
 | `/autonomous` | Toggle autonomous mode on/off for overnight runs |

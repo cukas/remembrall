@@ -44,8 +44,8 @@ printf "%s" "$remaining" > "$CTX_DIR/${session_id}" 2>/dev/null;
 
 - The bridge is cross-platform: uses `md5` on macOS, `md5sum` on Linux
 - The bridge writes to `/tmp/` so data is ephemeral (cleared on reboot)
-- The plugin itself CANNOT modify settings.json — this command guides the user/Claude through the edit
-- If the user doesn't have a status line configured at all, they need to set one up first. Point them to the Claude Code docs on status line configuration.
+- Since v2.3.0, the `session-resume.sh` hook auto-configures the bridge in settings.json on first session start. This command is a manual fallback for customization or troubleshooting.
+- If auto-setup failed and the user doesn't have a status line configured at all, this command guides them through the edit.
 - The bridge snippet is idempotent — running it multiple times is harmless
 
 ## Remembrall Gauge (Status Line)

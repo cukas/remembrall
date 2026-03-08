@@ -31,7 +31,7 @@ Show the user this reference:
 | `team_handoffs` | `false` | Copy handoffs to project `.remembrall/` |
 | `autonomous_mode` | `false` | Skip plan mode for overnight/unattended runs |
 | `retention_hours` | `72` | Hours to keep handoffs before cleanup |
-| `max_transcript_kb` | `256` | Fallback transcript size estimate |
+| `max_transcript_kb` | *(auto)* | Override max transcript size (rarely needed — bridge calibration handles this) |
 
 ## How Context Management Works
 
