@@ -75,7 +75,7 @@ cleanup() {
   rm -f /tmp/remembrall-nudges/test-esc-sess 2>/dev/null
   rm -f /tmp/remembrall-autonomous/test-esc-sess 2>/dev/null
   rm -f /tmp/remembrall-handoff-count/test-create-sess 2>/dev/null
-  rm -f /tmp/remembrall-sessions/$(remembrall_md5 "/tmp/test-bridge-project" 2>/dev/null) 2>/dev/null
+  rm -f "/tmp/remembrall-sessions/$(remembrall_md5 "/tmp/test-bridge-project" 2>/dev/null)" 2>/dev/null
   true
 }
 trap cleanup EXIT
