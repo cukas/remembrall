@@ -71,6 +71,9 @@ cleanup() {
   rm -f /tmp/remembrall-nudges/test-sess 2>/dev/null
   rm -f /tmp/remembrall-nudges/test-auto-sess 2>/dev/null
   rm -f /tmp/remembrall-autonomous/test-auto-sess 2>/dev/null
+  rm -f /tmp/claude-context-pct/test-esc-sess 2>/dev/null
+  rm -f /tmp/remembrall-nudges/test-esc-sess 2>/dev/null
+  rm -f /tmp/remembrall-autonomous/test-esc-sess 2>/dev/null
   rm -f /tmp/remembrall-handoff-count/test-create-sess 2>/dev/null
   rm -f /tmp/remembrall-sessions/$(remembrall_md5 "/tmp/test-bridge-project" 2>/dev/null) 2>/dev/null
   true
@@ -1212,6 +1215,49 @@ else
 fi
 
 rm -rf "$TEST_CWD_PC"
+
+# ── hooks.json timeout validation ─────────────────────────────────
+echo ""
+echo "hooks.json timeout validation:"
+
+HOOKS_FILE="$PLUGIN_ROOT/hooks/hooks.json"
+for hook_event in UserPromptSubmit PreCompact SessionStart Stop; do
+  HAS_TIMEOUT=$(jq -r --arg h "$hook_event" '.hooks[$h][0].hooks[0].timeout // empty' "$HOOKS_FILE")
+  if [ -n "$HAS_TIMEOUT" ] && [ "$HAS_TIMEOUT" -gt 0 ] 2>/dev/null; then
+    printf "${GREEN}  PASS${RESET} %s hook has timeout (%ss)\n" "$hook_event" "$HAS_TIMEOUT"
+    PASS=$((PASS + 1))
+  else
+    printf "${RED}  FAIL${RESET} %s hook missing timeout\n" "$hook_event"
+    FAIL=$((FAIL + 1))
+  fi
+done
+
+# ── context-monitor.sh (autonomous skill with special chars) ──────
+echo ""
+echo "context-monitor.sh (autonomous skill with special chars):"
+
+CTX_DIR="/tmp/claude-context-pct"
+mkdir -p "$CTX_DIR"
+TEST_CWD_ESC="$TMPDIR_ROOT/escape-test-cwd"
+mkdir -p "$TEST_CWD_ESC"
+
+remembrall_set_autonomous "test-esc-sess" 'ralph"loop'
+echo "25" > "$CTX_DIR/test-esc-sess"
+rm -f "/tmp/remembrall-nudges/test-esc-sess"
+
+OUTPUT=$(echo '{"session_id":"test-esc-sess","cwd":"'"$TEST_CWD_ESC"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
+
+if echo "$OUTPUT" | jq . >/dev/null 2>&1; then
+  printf "${GREEN}  PASS${RESET} autonomous skill with quotes produces valid JSON\n"
+  PASS=$((PASS + 1))
+else
+  printf "${RED}  FAIL${RESET} autonomous skill with quotes produces valid JSON\n"
+  FAIL=$((FAIL + 1))
+fi
+
+remembrall_clear_autonomous "test-esc-sess"
+rm -f "$CTX_DIR/test-esc-sess" "/tmp/remembrall-nudges/test-esc-sess"
+rm -rf "$TEST_CWD_ESC"
 
 # ═══════════════════════════════════════════════════════════════════
 echo ""

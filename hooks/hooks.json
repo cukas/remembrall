@@ -7,6 +7,7 @@
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/context-monitor.sh",
+            "timeout": 15,
             "async": false
           }
         ]
@@ -32,6 +33,7 @@
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/session-resume.sh",
+            "timeout": 15,
             "async": false
           }
         ]
