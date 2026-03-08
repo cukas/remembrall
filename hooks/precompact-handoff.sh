@@ -48,7 +48,6 @@ if [ -f "$HANDOFF_FILE" ]; then
   fi
   # Never overwrite a skill-generated handoff — it is higher quality.
   # Auto-generated handoffs have type: auto-generated in frontmatter.
-  local existing_type
   existing_type=$(remembrall_frontmatter_get "$HANDOFF_FILE" "type" 2>/dev/null)
   if [ "$existing_type" != "auto-generated" ]; then
     echo "Handoff exists and was skill-generated. Preserving." >&2

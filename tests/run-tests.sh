@@ -1168,6 +1168,50 @@ assert_eq "past threshold returns 0" "0" "$R"
 
 rm -rf "/tmp/remembrall-growth"
 
+# ── precompact-handoff.sh (skill-generated handoff protection) ────
+echo ""
+echo "precompact-handoff.sh (skill-generated handoff protection):"
+
+TEST_CWD_PC="$TMPDIR_ROOT/precompact-protect-test"
+mkdir -p "$TEST_CWD_PC"
+
+PC_TRANSCRIPT="$TMPDIR_ROOT/precompact_protect_transcript.jsonl"
+echo '{"type":"human","content":"implement auth"}' > "$PC_TRANSCRIPT"
+echo '{"type":"assistant","message":{"model":"claude-sonnet-4-6"},"content":[{"type":"text","text":"OK working on auth now."}]}' >> "$PC_TRANSCRIPT"
+
+PC_HANDOFF_DIR=$(remembrall_handoff_dir "$TEST_CWD_PC")
+mkdir -p "$PC_HANDOFF_DIR"
+PC_HANDOFF_FILE="$PC_HANDOFF_DIR/handoff-test-pc-sess.md"
+
+cat > "$PC_HANDOFF_FILE" << 'SKILL_HANDOFF'
+---
+{
+  "created": "2026-03-08T10:00:00Z",
+  "session_id": "test-pc-sess",
+  "project": "/tmp/test",
+  "status": "in_progress"
+}
+---
+
+# Session Handoff — Skill Generated
+
+This handoff was created by the /handoff skill with rich context.
+SKILL_HANDOFF
+
+touch -t 202603080900 "$PC_HANDOFF_FILE"
+
+echo '{"session_id":"test-pc-sess","cwd":"'"$TEST_CWD_PC"'","transcript_path":"'"$PC_TRANSCRIPT"'"}' | \
+  bash "$PLUGIN_ROOT/hooks/precompact-handoff.sh" 2>/dev/null
+
+if grep -q "Skill Generated" "$PC_HANDOFF_FILE"; then
+  printf "${GREEN}  PASS${RESET} skill-generated handoff not overwritten by precompact\n"
+  PASS=$((PASS + 1))
+else
+  printf "${RED}  FAIL${RESET} skill-generated handoff not overwritten by precompact\n"
+  FAIL=$((FAIL + 1))
+fi
+
+rm -rf "$TEST_CWD_PC"
 
 # ═══════════════════════════════════════════════════════════════════
 echo ""
