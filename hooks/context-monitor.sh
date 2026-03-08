@@ -61,8 +61,16 @@ BOOTSTRAP_EOF
   fi
 fi
 
-# Fallback: estimate from transcript size when bridge is missing or empty
+# Fallback: estimate from transcript size when bridge is missing or empty.
+# BUT: if the bridge is configured in settings.json, it will write a value on
+# the next response cycle. Don't fall back to the inaccurate estimator — the
+# bridge value will appear shortly. This prevents showing wildly wrong estimates
+# (e.g., 5%) when the bridge file is temporarily missing after compaction.
 if [ -z "$REMAINING" ]; then
+  if grep -q "claude-context-pct" "$HOME/.claude/settings.json" 2>/dev/null; then
+    # Bridge is configured but file not written yet — skip silently
+    exit 0
+  fi
   REMAINING=$(remembrall_estimate_context "$TRANSCRIPT_PATH") || exit 0
   ESTIMATED=" (estimated)"
 fi
