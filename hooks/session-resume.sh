@@ -99,6 +99,11 @@ if [ "$SOURCE" != "compact" ] && [ "$SOURCE" != "clear" ]; then
   exit 0
 fi
 
+# Invalidate bridge — context just reset, old value is wrong
+if [ -n "$SESSION_ID" ]; then
+  rm -f "/tmp/claude-context-pct/$SESSION_ID" 2>/dev/null
+fi
+
 HANDOFF_DIR=$(remembrall_handoff_dir "$CWD") || exit 0
 
 # No handoff directory — nothing to resume

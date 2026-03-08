@@ -106,9 +106,9 @@ fi
 
 # ── Bridge-paired calibration: log pair when both sources available ──
 if [ "$BRIDGE_ACTIVE" = true ] && [ -n "$TRANSCRIPT_PATH" ] && [ -f "$TRANSCRIPT_PATH" ]; then
-  STRUCTURAL_EST=$(remembrall_estimate_context_structural "$TRANSCRIPT_PATH" 2>/dev/null)
+  STRUCTURAL_EST=$(remembrall_estimate_context_structural "$TRANSCRIPT_PATH" "$CONTENT_BYTES" "$MODEL_NAME" 2>/dev/null)
   if [ -n "$STRUCTURAL_EST" ] && [ -n "$REMAINING" ]; then
-    remembrall_log_calibration_pair "$TRANSCRIPT_PATH" "$REMAINING" "$STRUCTURAL_EST" 2>/dev/null
+    remembrall_log_calibration_pair "$TRANSCRIPT_PATH" "$REMAINING" "$STRUCTURAL_EST" "$CONTENT_BYTES" "$MODEL_NAME" 2>/dev/null
   fi
 fi
 

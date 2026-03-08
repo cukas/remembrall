@@ -24,12 +24,11 @@ remembrall_md5() {
 # Bridge is keyed by session_id only (not CWD) because the status line's
 # workspace.current_dir can differ from the hook's CWD.
 # Without session_id: reads the published session_id for the CWD (diagnostics).
-# Ignores stale bridge files (>120s) — falls through to transcript estimation.
+# Bridge is invalidated on compact/clear by session-resume.sh.
 remembrall_find_bridge() {
   local cwd="$1"
   local session_id="$2"
   local ctx_dir="/tmp/claude-context-pct"
-  local max_age=120
 
   # Without session_id: try published session_id for this CWD (diagnostic use)
   if [ -z "$session_id" ]; then
@@ -40,12 +39,8 @@ remembrall_find_bridge() {
 
   local f="$ctx_dir/$session_id"
   if [ -f "$f" ]; then
-    local age
-    age=$(remembrall_file_age "$f")
-    if [ "$age" -le "$max_age" ]; then
-      echo "$f"
-      return 0
-    fi
+    echo "$f"
+    return 0
   fi
 
   return 1
@@ -213,18 +208,28 @@ remembrall_estimate_tokens() {
 # Before calibration, uses conservative per-model defaults.
 remembrall_estimate_context_structural() {
   local transcript_path="$1"
+  local precomputed_bytes="${2:-}"
+  local precomputed_model="${3:-}"
   if [ -z "$transcript_path" ] || [ ! -f "$transcript_path" ]; then
     return 1
   fi
 
   local content_bytes
-  content_bytes=$(remembrall_extract_content_bytes "$transcript_path") || return 1
+  if [ -n "$precomputed_bytes" ] && [ "$precomputed_bytes" -gt 0 ] 2>/dev/null; then
+    content_bytes="$precomputed_bytes"
+  else
+    content_bytes=$(remembrall_extract_content_bytes "$transcript_path") || return 1
+  fi
   [ "$content_bytes" -eq 0 ] 2>/dev/null && return 1
 
   # Detect model (needed for both content_max defaults and correction)
   local model_info model_name
-  model_info=$(remembrall_detect_model "$transcript_path")
-  model_name=$(printf '%s' "$model_info" | cut -f1)
+  if [ -n "$precomputed_model" ] && [ "$precomputed_model" != "unknown" ]; then
+    model_name="$precomputed_model"
+  else
+    model_info=$(remembrall_detect_model "$transcript_path")
+    model_name=$(printf '%s' "$model_info" | cut -f1)
+  fi
 
   # Get content max: calibrated per-model value, or default
   local content_max
@@ -362,19 +367,29 @@ remembrall_log_calibration_pair() {
   local transcript_path="$1"
   local bridge_pct="$2"
   local structural_pct="$3"
+  local precomputed_bytes="${4:-}"
+  local precomputed_model="${5:-}"
 
   if [ -z "$transcript_path" ] || [ ! -f "$transcript_path" ]; then
     return 1
   fi
 
   local content_bytes
-  content_bytes=$(remembrall_extract_content_bytes "$transcript_path" 2>/dev/null)
+  if [ -n "$precomputed_bytes" ] && [ "$precomputed_bytes" -gt 0 ] 2>/dev/null; then
+    content_bytes="$precomputed_bytes"
+  else
+    content_bytes=$(remembrall_extract_content_bytes "$transcript_path" 2>/dev/null)
+  fi
   [ -z "$content_bytes" ] && content_bytes=0
 
   # Get model and message count
   local model_info model_name
-  model_info=$(remembrall_detect_model "$transcript_path")
-  model_name=$(printf '%s' "$model_info" | cut -f1)
+  if [ -n "$precomputed_model" ] && [ "$precomputed_model" != "unknown" ]; then
+    model_name="$precomputed_model"
+  else
+    model_info=$(remembrall_detect_model "$transcript_path")
+    model_name=$(printf '%s' "$model_info" | cut -f1)
+  fi
 
   local msg_count
   msg_count=$(wc -l < "$transcript_path" 2>/dev/null | tr -d ' ')
