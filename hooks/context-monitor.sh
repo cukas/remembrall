@@ -184,6 +184,8 @@ fi
 if [ "$IS_AUTONOMOUS" = false ]; then
   AUTONOMOUS_SKILL=$(remembrall_is_autonomous "$SESSION_ID" 2>/dev/null) && IS_AUTONOMOUS=true || true
 fi
+# Escape for safe JSON interpolation
+AUTONOMOUS_SKILL=$(remembrall_escape_json "$AUTONOMOUS_SKILL")
 
 # <=20% — URGENT
 if remembrall_le "$REMAINING" 20; then
