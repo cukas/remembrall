@@ -30,6 +30,10 @@ The gauge auto-configures on first session. Run `/setup-remembrall` to customize
 💀 [██░░░░░░░░] 15% Obliviate!   memory wipe incoming — pulsing 🔮↔💀
 ```
 
+<p align="center">
+  <img src="docs/remembrall-demo.gif" alt="Remembrall in action — context drains, handoff fires, fresh start" width="780" />
+</p>
+
 ---
 
 ## How It Works

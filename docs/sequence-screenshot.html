@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0d1117;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+  }
+
+  .term {
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 10px;
+    overflow: hidden;
+    width: 820px;
+  }
+  .term-bar {
+    background: #161b22;
+    padding: 8px 14px;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    border-bottom: 1px solid #30363d;
+  }
+  .term-dot { width: 12px; height: 12px; border-radius: 50%; }
+  .term-dot.r { background: #f85149; }
+  .term-dot.y { background: #d29922; }
+  .term-dot.g { background: #3fb950; }
+  .term-title {
+    flex: 1; text-align: center;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    font-size: 12px; color: #484f58; margin-right: 50px;
+  }
+
+  .term-body {
+    padding: 16px 20px;
+    font-family: 'SF Mono', 'Fira Code', 'Consolas', 'Menlo', monospace;
+    font-size: 13.5px;
+    line-height: 1.7;
+    color: #c9d1d9;
+    min-height: 320px;
+    position: relative;
+  }
+
+  /* Scenes — only one visible at a time */
+  .scene { display: none; }
+  .scene.active { display: block; }
+
+  /* Status bar */
+  .cc-status {
+    background: #1c1c1c;
+    border-top: 1px solid #333;
+    padding: 5px 12px;
+    font-family: 'SF Mono', 'Fira Code', 'Consolas', 'Menlo', monospace;
+    font-size: 12px; color: #808080;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .gauge-wrap {
+    display: inline-flex; align-items: center; gap: 5px;
+  }
+  .gauge-bar {
+    display: inline-flex; align-items: center;
+    background: #2a2a2a; padding: 2px 3px; border-radius: 3px;
+  }
+  .gauge-block {
+    width: 8px; height: 12px; margin: 0 1px; border-radius: 1px;
+    transition: background 0.4s ease;
+  }
+  .gauge-block.on { background: #8aab3e; }
+  .gauge-block.warn { background: #cc6666; }
+  .gauge-block.off { background: #3a3a3a; }
+  .gauge-pct {
+    font-size: 12px;
+    transition: color 0.4s ease;
+  }
+  .gauge-pct.green { color: #8aab3e; }
+  .gauge-pct.red { color: #cc6666; }
+
+  .dim { color: #484f58; }
+  .muted { color: #6e7681; }
+  .bright { color: #e6edf3; }
+  .green { color: #3fb950; }
+  .prompt { color: #6e7681; }
+  .cmd { color: #e6edf3; }
+
+  /* Typing cursor */
+  .cursor {
+    display: inline-block;
+    width: 8px; height: 16px;
+    background: #c9d1d9;
+    vertical-align: text-bottom;
+    animation: blink 1s step-end infinite;
+  }
+  @keyframes blink {
+    50% { opacity: 0; }
+  }
+
+  /* Fade transition */
+  .fade-in { animation: fadeIn 0.5s ease forwards; }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+</style>
+</head>
+<body>
+
+<div class="term">
+  <div class="term-bar">
+    <div class="term-dot r"></div>
+    <div class="term-dot y"></div>
+    <div class="term-dot g"></div>
+    <div class="term-title">claude &mdash; ~/projects/nexus-api</div>
+  </div>
+  <div class="term-body">
+    <!-- Scene 1: Working normally -->
+    <div class="scene active" id="scene1">
+      <span class="prompt">&gt;</span> <span class="cmd">add rate limiting to the /api/events endpoint with a 100 req/min limit</span>
+      <br><br>
+      <span class="muted" id="s1-response"></span>
+      <span class="cursor" id="s1-cursor"></span>
+      <div id="s1-tools" style="display:none">
+        <br>
+        <span class="dim">Read</span> <span class="muted">src/routes/events.ts</span>
+        <br>
+        <span class="dim">Read</span> <span class="muted">src/middleware/auth.ts</span>
+        <br>
+        <span class="dim">Edit</span> <span class="muted">src/middleware/rateLimit.ts &mdash; created sliding window limiter</span>
+        <br>
+        <span class="dim">Edit</span> <span class="muted">src/routes/events.ts &mdash; applied rateLimiter(100, '1m')</span>
+        <br>
+        <span class="dim">Bash</span> <span class="muted">npm test -- --grep "rate limit"</span> <span class="green">4 passed</span>
+        <br><br>
+        <span class="muted">Rate limiting is set up. The sliding window middleware tracks requests per IP with automatic cleanup.</span>
+      </div>
+    </div>
+
+    <!-- Scene 2: Context low, handoff -->
+    <div class="scene" id="scene2">
+      <span class="prompt">&gt;</span> <span class="cmd">now add webhook delivery with retry logic for failed attempts</span>
+      <br><br>
+      <span class="muted" id="s2-response"></span>
+      <span class="cursor" id="s2-cursor" style="display:none"></span>
+      <div id="s2-handoff" style="display:none">
+        <br>
+        <span class="dim">Skill</span> <span class="muted">/handoff</span>
+        <br><br>
+        <span class="muted">Handoff saved: rate limiter done, webhook schema done, retry queue next. Entering plan mode so you can clear context.</span>
+        <br><br>
+        <span class="dim">EnterPlanMode</span>
+      </div>
+    </div>
+
+    <!-- Scene 3: Fresh context -->
+    <div class="scene" id="scene3">
+      <span class="muted" id="s3-response"></span>
+      <span class="cursor" id="s3-cursor" style="display:none"></span>
+      <div id="s3-work" style="display:none">
+        <br>
+        <span class="muted">Picking up where we left off. The webhook delivery system needs:</span>
+        <br>
+        <span class="muted">1. Exponential backoff retry (3 attempts, 1s/5s/30s)</span>
+        <br>
+        <span class="muted">2. Dead letter queue after max retries</span>
+        <br>
+        <span class="muted">3. Signature verification on delivery</span>
+        <br><br>
+        <span class="dim">Edit</span> <span class="muted">src/services/webhookDelivery.ts &mdash; retry queue with backoff</span>
+        <br>
+        <span class="dim">Edit</span> <span class="muted">src/services/deadLetterQueue.ts &mdash; created DLQ handler</span>
+        <br>
+        <span class="dim">Bash</span> <span class="muted">npm test</span> <span class="green">18 passed</span>
+      </div>
+    </div>
+  </div>
+  <div class="cc-status">
+    <span>Opus 4.6 in ~/projects/nexus-api on main&nbsp;|</span>
+    <div class="gauge-wrap">
+      <span>&#x1F52E;</span>
+      <div class="gauge-bar">
+        <div class="gauge-block on" id="b0"></div>
+        <div class="gauge-block on" id="b1"></div>
+        <div class="gauge-block on" id="b2"></div>
+        <div class="gauge-block on" id="b3"></div>
+        <div class="gauge-block on" id="b4"></div>
+        <div class="gauge-block on" id="b5"></div>
+        <div class="gauge-block on" id="b6"></div>
+        <div class="gauge-block off" id="b7"></div>
+        <div class="gauge-block off" id="b8"></div>
+        <div class="gauge-block off" id="b9"></div>
+      </div>
+      <span class="gauge-pct green" id="pct">72%</span>
+    </div>
+  </div>
+</div>
+
+<script>
+const blocks = Array.from({length: 10}, (_, i) => document.getElementById('b' + i));
+const pct = document.getElementById('pct');
+
+function setGauge(n, color) {
+  blocks.forEach((b, i) => {
+    b.className = 'gauge-block ' + (i < n ? color : 'off');
+  });
+}
+function setPct(text, color) {
+  pct.textContent = text;
+  pct.className = 'gauge-pct ' + color;
+}
+
+function typeText(el, text, speed, cb) {
+  let i = 0;
+  const iv = setInterval(() => {
+    el.textContent = text.slice(0, ++i);
+    if (i >= text.length) { clearInterval(iv); if (cb) cb(); }
+  }, speed);
+}
+
+function showScene(id) {
+  document.querySelectorAll('.scene').forEach(s => s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+}
+
+// Timeline
+setTimeout(() => {
+  // Scene 1: type response
+  const s1r = document.getElementById('s1-response');
+  const s1c = document.getElementById('s1-cursor');
+  typeText(s1r, "I'll add rate limiting to the events endpoint. Let me read the current router setup.", 25, () => {
+    s1c.style.display = 'none';
+    setTimeout(() => {
+      document.getElementById('s1-tools').style.display = 'block';
+    }, 400);
+  });
+}, 800);
+
+// Drain gauge 72 -> 28 over time
+setTimeout(() => {
+  setGauge(6, 'on'); setPct('62%', 'green');
+}, 3000);
+setTimeout(() => {
+  setGauge(5, 'on'); setPct('51%', 'green');
+}, 4000);
+setTimeout(() => {
+  setGauge(4, 'on'); setPct('43%', 'green');
+}, 5000);
+setTimeout(() => {
+  setGauge(3, 'warn'); setPct('35%', 'red');
+}, 6000);
+setTimeout(() => {
+  setGauge(3, 'warn'); setPct('28% ⚡', 'red');
+}, 6800);
+
+// Scene 2: context low
+setTimeout(() => {
+  showScene('scene2');
+  const s2r = document.getElementById('s2-response');
+  const s2c = document.getElementById('s2-cursor');
+  s2c.style.display = 'inline-block';
+  typeText(s2r, "I'll continue with the webhook delivery, but first I need to create a handoff — my context is running low.", 25, () => {
+    s2c.style.display = 'none';
+    setTimeout(() => {
+      document.getElementById('s2-handoff').style.display = 'block';
+    }, 600);
+  });
+}, 7500);
+
+// Scene 3: fresh context
+setTimeout(() => {
+  showScene('scene3');
+  setGauge(9, 'on'); setPct('93%', 'green');
+  const s3r = document.getElementById('s3-response');
+  const s3c = document.getElementById('s3-cursor');
+  s3c.style.display = 'inline-block';
+  typeText(s3r, "Resuming: nexus-api — rate limiter and webhook schema done, implementing retry queue next.", 25, () => {
+    s3c.style.display = 'none';
+    setTimeout(() => {
+      document.getElementById('s3-work').style.display = 'block';
+    }, 500);
+  });
+}, 13000);
+
+// Loop after pause
+setTimeout(() => {
+  location.reload();
+}, 20000);
+</script>
+</body>
+</html>
