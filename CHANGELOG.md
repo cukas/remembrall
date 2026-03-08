@@ -4,6 +4,33 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2.5.0] - 2026-03-08
+
+### Added
+- Configurable context thresholds: `threshold_journal` (default: 60), `threshold_warning` (default: 30), `threshold_urgent` (default: 20)
+- Debug logging system: enable via `debug: true` config or `REMEMBRALL_DEBUG=1` env — logs to `~/.remembrall/debug.log` with ISO timestamps, hook names, and 1MB auto-rotation
+- `remembrall-uninstall.sh` script with `--dry-run` support for clean removal of bridge, data, and temp files
+- `format_version: 2` in handoff frontmatter for forward compatibility
+- Configurable `recency_window` (default: 60s) for handoff-to-session matching
+- Config validation for `recency_window`, `debug`, and threshold settings
+- 265 new test lines covering all v2.5.0 features (198 total tests)
+
+### Changed
+- Preemptive handoff creation now runs in background to avoid eating into context-monitor's 15s timeout
+- `/remembrall-uninstall` command simplified to delegate to `scripts/remembrall-uninstall.sh`
+- Architecture diagram updated to show configurable thresholds
+
+### Fixed
+- `remembrall_hook_enabled()` jq injection: hook name now passed via `--arg` instead of raw string interpolation
+- `remembrall_frontmatter_get()` YAML fallback safe under `set -euo pipefail` (added `|| true`)
+- Empty `FILE_PATHS` guard in precompact-handoff to avoid pipefail double-output
+- Defensive check for other plugins' status line before bridge injection
+
+### Refactored
+- Extracted `remembrall_default_content_max()` — model-specific content_max defaults in one place (was duplicated in context-monitor.sh and lib.sh)
+- Extracted `remembrall_threshold()` helper for validated, configurable threshold access
+- All hooks now export `REMEMBRALL_HOOK` for debug log identification
+
 ## [2.4.0] - 2026-03-08
 
 ### Fixed

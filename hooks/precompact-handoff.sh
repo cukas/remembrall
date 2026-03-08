@@ -4,6 +4,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+export REMEMBRALL_HOOK="precompact-handoff"
 source "$SCRIPT_DIR/lib.sh"
 
 remembrall_require_jq
@@ -151,8 +152,11 @@ if remembrall_git_enabled "$CWD"; then
   fi
 fi
 
-# Build JSON files array
-FILES_JSON=$(printf '%s\n' "$FILE_PATHS" | grep -v '^$' | head -50 | jq -R . | jq -s '.' || echo '[]')
+# Build JSON files array — guard empty FILE_PATHS to avoid pipefail + || echo double-output
+FILES_JSON="[]"
+if [ -n "$FILE_PATHS" ]; then
+  FILES_JSON=$(printf '%s\n' "$FILE_PATHS" | { grep -v '^$' || true; } | head -50 | jq -R . | jq -s '.' 2>/dev/null) || FILES_JSON="[]"
+fi
 
 # Determine team mode
 TEAM_MODE=$(remembrall_config "team_handoffs" "false")
@@ -167,6 +171,7 @@ NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 {
   echo '---'
   jq -n \
+    --argjson format_version 2 \
     --arg created "$NOW" \
     --arg session_id "$SESSION_ID" \
     --arg previous_session "${PREV_SESSION:-}" \
@@ -179,6 +184,7 @@ NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
     --argjson files "$FILES_JSON" \
     --argjson team "${TEAM_MODE}" \
     '{
+      format_version: $format_version,
       created: $created,
       session_id: $session_id,
       previous_session: $previous_session,
@@ -266,5 +272,6 @@ if [ "$RETENTION_MINS" -gt 0 ] 2>/dev/null; then
 fi
 
 # Signal to Claude that handoff was created
+remembrall_debug "handoff saved: $HANDOFF_FILE (session=$SESSION_ID, files=$(echo "$FILE_PATHS" | wc -l | tr -d ' '))"
 echo "Context is being compacted. Handoff saved to $HANDOFF_FILE — it will be loaded automatically on next session start." >&2
 exit 0

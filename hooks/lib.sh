@@ -1,6 +1,66 @@
 #!/usr/bin/env bash
 # Shared helpers for remembrall hooks
 
+# ─── Debug Logging ─────────────────────────────────────────────────
+# Enable via config: remembrall_config_set "debug" "true"
+# Or env: REMEMBRALL_DEBUG=1
+# Logs to ~/.remembrall/debug.log (rotated at 1MB)
+
+remembrall_debug() {
+  # Fast path: check cached env var (no jq call after first invocation)
+  case "${_REMEMBRALL_DEBUG_CACHED:-}" in
+    0) return 0 ;;  # debug off — cached
+    1) ;;           # debug on — fall through to log
+    *)
+      # First call: resolve from env or config, then cache
+      if [ "${REMEMBRALL_DEBUG:-}" = "1" ]; then
+        export _REMEMBRALL_DEBUG_CACHED=1
+      else
+        local debug_enabled
+        debug_enabled=$(remembrall_config "debug" "false" 2>/dev/null)
+        if [ "$debug_enabled" = "true" ]; then
+          export _REMEMBRALL_DEBUG_CACHED=1
+        else
+          export _REMEMBRALL_DEBUG_CACHED=0
+          return 0
+        fi
+      fi
+      ;;
+  esac
+
+  local log_file="$HOME/.remembrall/debug.log"
+  mkdir -p "$HOME/.remembrall" 2>/dev/null
+
+  # Rotate at 1MB
+  if [ -f "$log_file" ]; then
+    local size
+    size=$(wc -c < "$log_file" 2>/dev/null | tr -d ' ')
+    if [ "${size:-0}" -gt 1048576 ] 2>/dev/null; then
+      mv "$log_file" "${log_file}.1" 2>/dev/null
+    fi
+  fi
+
+  printf '%s [%s] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${REMEMBRALL_HOOK:-remembrall}" "$*" >> "$log_file" 2>/dev/null
+}
+
+# ─── Configurable Thresholds ──────────────────────────────────────
+# Users can override nudge thresholds via config.json:
+#   threshold_journal (default: 60) — first nudge: "run /handoff"
+#   threshold_warning (default: 30) — second nudge: "run /handoff then EnterPlanMode"
+#   threshold_urgent  (default: 20) — final nudge: "IMMEDIATELY"
+
+remembrall_threshold() {
+  local name="$1"
+  local default="$2"
+  local val
+  val=$(remembrall_config "threshold_${name}" "$default" 2>/dev/null)
+  if [[ "$val" =~ ^[0-9]+$ ]] && [ "$val" -gt 0 ] && [ "$val" -lt 100 ] 2>/dev/null; then
+    echo "$val"
+  else
+    echo "$default"
+  fi
+}
+
 # Require jq — exit gracefully if not available
 remembrall_require_jq() {
   if ! command -v jq >/dev/null 2>&1; then
@@ -144,6 +204,19 @@ remembrall_estimate_context() {
   echo "$remaining"
 }
 
+# ─── Model Default Content Max ────────────────────────────────────
+# Single source of truth for model-specific content_max defaults.
+# Used when no calibration data is available yet.
+remembrall_default_content_max() {
+  local model_name="${1:-unknown}"
+  case "$model_name" in
+    claude-opus-4-6*|claude-opus-4*)     echo 358400 ;;  # ~350KB
+    claude-sonnet-4-6*|claude-sonnet-4*) echo 337920 ;;  # ~330KB
+    claude-haiku-4-5*|claude-haiku-4*)   echo 317440 ;;  # ~310KB
+    *)                                    echo 337920 ;;  # ~330KB default
+  esac
+}
+
 # ─── Content Bytes Extraction ─────────────────────────────────────
 
 # Single source of truth for extracting content bytes from a transcript.
@@ -236,14 +309,7 @@ remembrall_estimate_context_structural() {
   local content_max
   content_max=$(remembrall_calibrated_content_max "$transcript_path")
   if [ -z "$content_max" ] || [ "$content_max" -eq 0 ] 2>/dev/null; then
-    # Content max varies hugely by user setup (plugins, tools, CLAUDE.md).
-    # These defaults are a compromise — calibration replaces them quickly.
-    case "$model_name" in
-      claude-opus-4-6*|claude-opus-4*)   content_max=358400 ;;  # ~350KB
-      claude-sonnet-4-6*|claude-sonnet-4*) content_max=337920 ;; # ~330KB
-      claude-haiku-4-5*|claude-haiku-4*)  content_max=317440 ;;  # ~310KB
-      *)                                   content_max=337920 ;;  # ~330KB
-    esac
+    content_max=$(remembrall_default_content_max "$model_name")
   fi
 
   # Too early to estimate reliably (<30% of content max used)
@@ -870,15 +936,21 @@ remembrall_config_validate() {
         return 1
       fi
       ;;
-    max_transcript_kb)
+    max_transcript_kb|recency_window)
       if ! [[ "$value" =~ ^[0-9]+$ ]] || [ "$value" -eq 0 ]; then
-        echo "remembrall: invalid max_transcript_kb '$value' — must be a positive integer" >&2
+        echo "remembrall: invalid $key '$value' — must be a positive integer" >&2
         return 1
       fi
       ;;
-    autonomous_mode|git_integration|team_handoffs|easter_eggs)
+    autonomous_mode|git_integration|team_handoffs|easter_eggs|debug)
       if [ "$value" != "true" ] && [ "$value" != "false" ]; then
         echo "remembrall: invalid $key '$value' — must be true or false" >&2
+        return 1
+      fi
+      ;;
+    threshold_journal|threshold_warning|threshold_urgent)
+      if ! [[ "$value" =~ ^[0-9]+$ ]] || [ "$value" -eq 0 ] || [ "$value" -ge 100 ]; then
+        echo "remembrall: invalid $key '$value' — must be an integer between 1 and 99" >&2
         return 1
       fi
       ;;
@@ -936,7 +1008,7 @@ remembrall_hook_enabled() {
   local hook_name="$1"
   local disabled
   disabled=$(remembrall_config "disabled_hooks" "[]")
-  if echo "$disabled" | jq -e "index(\"$hook_name\")" >/dev/null 2>&1; then
+  if echo "$disabled" | jq -e --arg h "$hook_name" 'index($h)' >/dev/null 2>&1; then
     return 1
   fi
   return 0
@@ -1123,5 +1195,7 @@ remembrall_frontmatter_get() {
   fi
 
   # Legacy YAML fallback — simple key: value lines only
-  printf '%s\n' "$block" | grep "^${key}:" | sed "s/^${key}: *//" | head -1
+  # Use `|| true` to ensure non-zero exit from grep (no match) doesn't propagate
+  # when caller has set -euo pipefail
+  printf '%s\n' "$block" | grep "^${key}:" | sed "s/^${key}: *//" | head -1 || true
 }

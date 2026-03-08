@@ -138,6 +138,7 @@ NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 {
   echo '---'
   jq -n \
+    --argjson format_version 2 \
     --arg created "$NOW" \
     --arg session_id "$SESSION_ID" \
     --arg previous_session "${PREV_SESSION:-}" \
@@ -150,6 +151,7 @@ NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
     --argjson tasks "$TASKS_JSON" \
     --argjson team "${TEAM_MODE}" \
     '{
+      format_version: $format_version,
       created: $created,
       session_id: $session_id,
       previous_session: $previous_session,

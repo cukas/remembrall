@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # UserPromptSubmit hook: monitors actual context % via status-line bridge
-# Triggers journal checkpoint at 60%, plan mode at 30%, urgent plan mode at 20%
+# Triggers journal checkpoint at configurable thresholds (default: 60%, 30%, 20%)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+export REMEMBRALL_HOOK="context-monitor"
 source "$SCRIPT_DIR/lib.sh"
 
 remembrall_require_jq
@@ -76,6 +77,13 @@ if [ -z "$REMAINING" ]; then
   ESTIMATED=" (estimated)"
 fi
 
+# ── Configurable thresholds ───────────────────────────────────────
+THRESHOLD_JOURNAL=$(remembrall_threshold "journal" 60)
+THRESHOLD_WARNING=$(remembrall_threshold "warning" 30)
+THRESHOLD_URGENT=$(remembrall_threshold "urgent" 20)
+
+remembrall_debug "thresholds: journal=${THRESHOLD_JOURNAL} warning=${THRESHOLD_WARNING} urgent=${THRESHOLD_URGENT} remaining=${REMAINING}"
+
 # Nudge tracking — don't spam every prompt
 NUDGE_DIR="/tmp/remembrall-nudges"
 mkdir -p "$NUDGE_DIR"
@@ -86,14 +94,15 @@ if [ -f "$NUDGE_FILE" ]; then
   LAST_NUDGE=$(cat "$NUDGE_FILE")
 fi
 
-# Reset nudge state if context recovered (post-compaction: remaining > 80%)
-if remembrall_gt "$REMAINING" 80; then
+# Reset nudge state if context recovered (post-compaction: remaining > journal threshold + 20%)
+RESET_THRESHOLD=$((THRESHOLD_JOURNAL + 20))
+if remembrall_gt "$REMAINING" "$RESET_THRESHOLD"; then
   rm -f "$NUDGE_FILE"
   exit 0
 fi
 
-# >60% remaining — do nothing
-if remembrall_gt "$REMAINING" 60; then
+# Above journal threshold — do nothing
+if remembrall_gt "$REMAINING" "$THRESHOLD_JOURNAL"; then
   exit 0
 fi
 
@@ -132,12 +141,7 @@ if [ -n "$TRANSCRIPT_PATH" ] && [ -f "$TRANSCRIPT_PATH" ]; then
       # Get content_max for prompts-until-threshold calculation
       _content_max=$(remembrall_calibrated_content_max "$TRANSCRIPT_PATH" 2>/dev/null)
       if [ -z "$_content_max" ] || [ "$_content_max" -eq 0 ] 2>/dev/null; then
-        case "$MODEL_NAME" in
-          claude-opus-4-6*|claude-opus-4*)   _content_max=358400 ;;
-          claude-sonnet-4-6*|claude-sonnet-4*) _content_max=337920 ;;
-          claude-haiku-4-5*|claude-haiku-4*)  _content_max=317440 ;;
-          *)                                   _content_max=337920 ;;
-        esac
+        _content_max=$(remembrall_default_content_max "$MODEL_NAME")
       fi
       PROMPTS_LEFT=$(remembrall_prompts_until_threshold "$CONTENT_BYTES" "$AVG_GROWTH" "$_content_max" 20 2>/dev/null)
       if [ -n "$PROMPTS_LEFT" ] && [ "$PROMPTS_LEFT" -gt 0 ] 2>/dev/null; then
@@ -150,8 +154,8 @@ if [ -n "$TRANSCRIPT_PATH" ] && [ -f "$TRANSCRIPT_PATH" ]; then
   fi
 fi
 
-# <=60% and >30% — JOURNAL CHECKPOINT
-if remembrall_gt "$REMAINING" 30; then
+# Between journal and warning thresholds — JOURNAL CHECKPOINT
+if remembrall_gt "$REMAINING" "$THRESHOLD_WARNING"; then
   if [ "$LAST_NUDGE" = "journal" ] || [ "$LAST_NUDGE" = "warning" ] || [ "$LAST_NUDGE" = "urgent" ]; then
     exit 0
   fi
@@ -177,13 +181,17 @@ fi
 _create_preemptive_handoff() {
   [ -z "$CWD" ] || [ -z "$SESSION_ID" ] || [ -z "$TRANSCRIPT_PATH" ] && return
   [ ! -f "$TRANSCRIPT_PATH" ] && return
-  jq -n \
-    --arg trigger "precompact_auto" \
-    --arg session_id "$SESSION_ID" \
-    --arg cwd "$CWD" \
-    --arg transcript_path "$TRANSCRIPT_PATH" \
-    '{trigger: $trigger, session_id: $session_id, cwd: $cwd, transcript_path: $transcript_path}' | \
-    "$SCRIPT_DIR/precompact-handoff.sh" >/dev/null 2>&1
+  # Run in background to avoid eating into context-monitor's 15s timeout.
+  # The handoff is a safety net — we don't need it to complete before emitting the nudge.
+  (
+    jq -n \
+      --arg trigger "precompact_auto" \
+      --arg session_id "$SESSION_ID" \
+      --arg cwd "$CWD" \
+      --arg transcript_path "$TRANSCRIPT_PATH" \
+      '{trigger: $trigger, session_id: $session_id, cwd: $cwd, transcript_path: $transcript_path}' | \
+      "$SCRIPT_DIR/precompact-handoff.sh" >/dev/null 2>&1
+  ) &
 }
 
 # ── Detect autonomous mode (ralph loop, swarms, etc.) ──
@@ -199,8 +207,8 @@ fi
 # Escape for safe JSON interpolation
 AUTONOMOUS_SKILL=$(remembrall_escape_json "$AUTONOMOUS_SKILL")
 
-# <=20% — URGENT
-if remembrall_le "$REMAINING" 20; then
+# At or below urgent threshold — URGENT
+if remembrall_le "$REMAINING" "$THRESHOLD_URGENT"; then
   if [ "$LAST_NUDGE" = "urgent" ]; then
     exit 0
   fi
@@ -223,7 +231,7 @@ EOF
   exit 0
 fi
 
-# <=30% — WARNING
+# At or below warning threshold — WARNING
 if [ "$LAST_NUDGE" = "warning" ] || [ "$LAST_NUDGE" = "urgent" ]; then
   exit 0
 fi

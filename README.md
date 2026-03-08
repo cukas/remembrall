@@ -48,11 +48,11 @@ The gauge auto-configures on first session. Run `/setup-remembrall` to customize
 │       │              use bridge   estimate from                      │
 │       │                  │        transcript size                    │
 │       │                  ▼           ▼                               │
-│       │               >60%? ── do nothing (silent)                   │
+│       │            >journal%? ── do nothing (silent)                  │
 │       │                  │                                           │
-│       │              <=60%? ── early handoff nudge                     │
+│       │           <=journal%? ── early handoff nudge (default 60%)    │
 │       │                  │                                           │
-│       │              <=30%? ── autonomous mode?                       │
+│       │           <=warning%? ── autonomous mode?   (default 30%)    │
 │       │                  │         │                                 │
 │       │                  │    ┌────┴────┐                            │
 │       │                  │    no        yes                          │
@@ -66,7 +66,7 @@ The gauge auto-configures on first session. Run `/setup-remembrall` to customize
 │       │                  │     active tools/agents/skills)           │
 │       │                  │    then calls EnterPlanMode               │
 │       │                  │         │                                 │
-│       │              <=20%? ── same, but IMMEDIATELY                 │
+│       │            <=urgent%? ── same, but IMMEDIATELY (default 20%) │
 │       │                  │                                           │
 │       │                  ▼                                           │
 │       │            Plan mode UI appears:                             │
@@ -101,9 +101,9 @@ The gauge auto-configures on first session. Run `/setup-remembrall` to customize
 
 ## Five Layers of Protection
 
-1. **Plan Mode Trigger** (`context-monitor.sh`) — Reads context % from a bridge file, or estimates it from transcript size as a fallback. At 30% remaining, tells Claude to run `/handoff` and then call `EnterPlanMode`. The `/handoff` skill captures task state, files, decisions, **and a prescriptive "Resume With" section** (which skill/methodology to invoke, active agents, MCP servers). The user sees the native "Yes, clear context" option — one click for a fresh start. At 20%, the same but with urgent priority.
+1. **Plan Mode Trigger** (`context-monitor.sh`) — Reads context % from a bridge file, or estimates it from transcript size as a fallback. At the warning threshold (default: 30%) remaining, tells Claude to run `/handoff` and then call `EnterPlanMode`. The `/handoff` skill captures task state, files, decisions, **and a prescriptive "Resume With" section** (which skill/methodology to invoke, active agents, MCP servers). The user sees the native "Yes, clear context" option — one click for a fresh start. At the urgent threshold (default: 20%), the same but with urgent priority. All thresholds are configurable via `threshold_journal`, `threshold_warning`, and `threshold_urgent` in config.
 
-2. **Journal Checkpoint** (`context-monitor.sh` at 60%) — Before things get urgent, Remembrall nudges Claude to run `/handoff` to save progress. This early nudge ensures a handoff document exists before context gets critical, so if compaction strikes between 60% and 30%, the handoff already reflects recent work.
+2. **Journal Checkpoint** (`context-monitor.sh` at configurable threshold, default 60%) — Before things get urgent, Remembrall nudges Claude to run `/handoff` to save progress. This early nudge ensures a handoff document exists before context gets critical, so if compaction strikes between the journal and warning thresholds, the handoff already reflects recent work.
 
 3. **Safety Net** (`precompact-handoff.sh`) — If the early warning is missed and Claude auto-compacts, this hook extracts files touched, errors encountered, git operations, task state, and recent conversation from the transcript into a handoff document. Also captures git patches of session-touched files when git integration is enabled. Will not overwrite a higher-quality skill-generated handoff.
 
@@ -156,6 +156,11 @@ Remembrall uses `~/.remembrall/config.json` for persistent settings. Run `/setup
 | `max_transcript_kb` | *(auto)* | Override max transcript size in KB. Rarely needed — bridge-derived calibration handles this automatically. |
 | `easter_eggs` | `true` | Show Harry Potter spell mappings in context nudges |
 | `disabled_hooks` | `[]` | Array of hook names to disable (e.g., `["stop-check"]`) |
+| `threshold_journal` | `60` | Context % that triggers the first "run /handoff" nudge |
+| `threshold_warning` | `30` | Context % that triggers the "run /handoff + plan mode" nudge |
+| `threshold_urgent` | `20` | Context % that triggers the "IMMEDIATELY" nudge |
+| `recency_window` | `60` | Seconds to look back when matching handoffs to sessions |
+| `debug` | `false` | Enable debug logging to `~/.remembrall/debug.log` |
 
 Settings apply globally — once configured, all Claude sessions respect them. Values are stored as native JSON types (booleans, numbers).
 
@@ -222,6 +227,7 @@ chmod +x hooks/*.sh scripts/*.sh
 | `/remembrall-status` | Diagnostic: check context %, bridge, handoffs |
 | `/remembrall-help` | List all commands, skills, and config options |
 | `/autonomous` | Toggle autonomous mode on/off for overnight runs |
+| `/remembrall-uninstall` | Clean removal: removes bridge, data, and temp files (supports `--dry-run`) |
 
 ## Skills
 
@@ -248,6 +254,21 @@ Handoff files and patches are stored per-project:
 - Each session gets its own file — multiple Claude instances can coexist
 - Handoffs older than the configured retention period (default: 72 hours) are auto-cleaned
 - Consumed handoffs are renamed to `.consumed.md` and auto-cleaned after 1 hour
+- Handoffs include `format_version: 2` in frontmatter for forward compatibility
+
+## Debug Logging
+
+Enable debug logging to troubleshoot hook behavior:
+
+```bash
+# Via config (persistent)
+remembrall_config_set "debug" "true"
+
+# Via environment (one-off)
+REMEMBRALL_DEBUG=1 claude
+```
+
+Logs are written to `~/.remembrall/debug.log` with ISO timestamps and hook names. The log is auto-rotated at 1MB. Each hook identifies itself in log entries (e.g., `[context-monitor]`, `[session-resume]`).
 
 ## Example Use Cases
 
@@ -301,9 +322,11 @@ You're walking Claude through a complex codebase architecture so it can help new
 
 **Stale calibration after model switch** — Delete `~/.remembrall/calibration.json` and let Remembrall recalibrate from the new model's bridge data.
 
-**Hooks don't seem to be running** — Ensure scripts are executable: `chmod +x hooks/*.sh scripts/*.sh`. Verify `jq --version` returns a version. Check that the plugin is installed: `claude plugin list`.
+**Hooks don't seem to be running** — Ensure scripts are executable: `chmod +x hooks/*.sh scripts/*.sh`. Verify `jq --version` returns a version. Check that the plugin is installed: `claude plugin list`. Enable debug logging (`remembrall_config_set "debug" "true"`) and check `~/.remembrall/debug.log` for hook activity.
 
 **Bridge file is empty/missing** — The bridge file is written on each Claude response cycle. After `/clear` or compaction, it's intentionally deleted and recreated on the next response. If persistently missing, restart your session.
+
+**Another plugin owns the status line** — If Remembrall detects an existing `statusLine.command` that doesn't reference context variables, it appends the bridge cautiously and logs a warning. Check the debug log for details.
 
 ## FAQ
 

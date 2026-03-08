@@ -1379,6 +1379,271 @@ remembrall_config_set "autonomous_mode" "false" 2>/dev/null
 
 # ═══════════════════════════════════════════════════════════════════
 echo ""
+echo "v2.5.0 Improvements tests"
+echo "════════════════════════════════"
+
+# ── remembrall_default_content_max ────────────────────────────────
+echo ""
+echo "remembrall_default_content_max:"
+
+R=$(remembrall_default_content_max "claude-opus-4-6-20260301")
+assert_eq "opus content_max" "358400" "$R"
+
+R=$(remembrall_default_content_max "claude-sonnet-4-6-20260301")
+assert_eq "sonnet content_max" "337920" "$R"
+
+R=$(remembrall_default_content_max "claude-haiku-4-5-20251001")
+assert_eq "haiku content_max" "317440" "$R"
+
+R=$(remembrall_default_content_max "unknown-model")
+assert_eq "unknown model falls back to sonnet default" "337920" "$R"
+
+R=$(remembrall_default_content_max "")
+assert_eq "empty model falls back to sonnet default" "337920" "$R"
+
+# ── Configurable thresholds ───────────────────────────────────────
+echo ""
+echo "Configurable thresholds:"
+
+rm -f "$HOME/.remembrall/config.json"
+
+# Default thresholds
+R=$(remembrall_threshold "journal" 60)
+assert_eq "default journal threshold" "60" "$R"
+
+R=$(remembrall_threshold "warning" 30)
+assert_eq "default warning threshold" "30" "$R"
+
+R=$(remembrall_threshold "urgent" 20)
+assert_eq "default urgent threshold" "20" "$R"
+
+# Custom thresholds
+remembrall_config_set "threshold_journal" "50" 2>/dev/null
+R=$(remembrall_threshold "journal" 60)
+assert_eq "custom journal threshold" "50" "$R"
+
+# Invalid thresholds rejected
+remembrall_config_set "threshold_warning" "0" 2>/dev/null && STATUS=0 || STATUS=1
+assert_eq "zero threshold rejected" "1" "$STATUS"
+
+remembrall_config_set "threshold_warning" "100" 2>/dev/null && STATUS=0 || STATUS=1
+assert_eq "100 threshold rejected" "1" "$STATUS"
+
+remembrall_config_set "threshold_warning" "abc" 2>/dev/null && STATUS=0 || STATUS=1
+assert_eq "non-numeric threshold rejected" "1" "$STATUS"
+
+# Invalid value in config falls back to default
+echo '{"threshold_urgent": "banana"}' > "$HOME/.remembrall/config.json"
+R=$(remembrall_threshold "urgent" 20)
+assert_eq "invalid config value falls back to default" "20" "$R"
+
+rm -f "$HOME/.remembrall/config.json"
+
+# ── Configurable thresholds in context-monitor.sh ─────────────────
+echo ""
+echo "Configurable thresholds in context-monitor.sh:"
+
+CTX_DIR="/tmp/claude-context-pct"
+mkdir -p "$CTX_DIR"
+TEST_CWD_TH="$TMPDIR_ROOT/threshold-test-cwd"
+mkdir -p "$TEST_CWD_TH"
+
+# Set custom journal threshold to 40 (default is 60)
+remembrall_config_set "threshold_journal" "40" 2>/dev/null
+
+# At 45% remaining with threshold=40: should be silent (above journal threshold)
+echo "45" > "$CTX_DIR/test-th-sess"
+rm -f "/tmp/remembrall-nudges/test-th-sess"
+OUTPUT=$(echo '{"session_id":"test-th-sess","cwd":"'"$TEST_CWD_TH"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
+if [ -z "$OUTPUT" ]; then
+  printf "${GREEN}  PASS${RESET} 45%% with threshold=40: silent (above threshold)\n"
+  PASS=$((PASS + 1))
+else
+  printf "${RED}  FAIL${RESET} 45%% with threshold=40: should be silent (got output)\n"
+  FAIL=$((FAIL + 1))
+fi
+
+# At 35% remaining with threshold=40: should trigger journal
+echo "35" > "$CTX_DIR/test-th-sess2"
+rm -f "/tmp/remembrall-nudges/test-th-sess2"
+OUTPUT=$(echo '{"session_id":"test-th-sess2","cwd":"'"$TEST_CWD_TH"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
+assert_match "35% with threshold=40: triggers journal" "handoff" "$OUTPUT"
+
+rm -f "$CTX_DIR/test-th-sess" "$CTX_DIR/test-th-sess2"
+rm -f "/tmp/remembrall-nudges/test-th-sess" "/tmp/remembrall-nudges/test-th-sess2"
+rm -rf "$TEST_CWD_TH"
+rm -f "$HOME/.remembrall/config.json"
+
+# ── Debug logging ─────────────────────────────────────────────────
+echo ""
+echo "Debug logging:"
+
+rm -f "$HOME/.remembrall/config.json"
+rm -f "$HOME/.remembrall/debug.log"
+# Reset debug cache for this test
+unset _REMEMBRALL_DEBUG_CACHED 2>/dev/null || true
+
+# Debug off by default — no log file created
+remembrall_debug "test message should not appear"
+if [ ! -f "$HOME/.remembrall/debug.log" ]; then
+  printf "${GREEN}  PASS${RESET} debug off: no log file created\n"
+  PASS=$((PASS + 1))
+else
+  printf "${RED}  FAIL${RESET} debug off: log file should not exist\n"
+  FAIL=$((FAIL + 1))
+fi
+
+# Reset cache, enable via config
+unset _REMEMBRALL_DEBUG_CACHED 2>/dev/null || true
+remembrall_config_set "debug" "true" 2>/dev/null
+remembrall_debug "test debug message"
+if [ -f "$HOME/.remembrall/debug.log" ] && grep -q "test debug message" "$HOME/.remembrall/debug.log" 2>/dev/null; then
+  printf "${GREEN}  PASS${RESET} debug on: message logged\n"
+  PASS=$((PASS + 1))
+else
+  printf "${RED}  FAIL${RESET} debug on: message not found in log\n"
+  FAIL=$((FAIL + 1))
+fi
+
+# Check log format includes timestamp and hook name
+if grep -qE '^\d{4}-\d{2}-\d{2}T' "$HOME/.remembrall/debug.log" 2>/dev/null; then
+  printf "${GREEN}  PASS${RESET} debug log has ISO timestamp\n"
+  PASS=$((PASS + 1))
+else
+  printf "${RED}  FAIL${RESET} debug log missing ISO timestamp\n"
+  FAIL=$((FAIL + 1))
+fi
+
+# Debug caching — second call should not re-read config
+# (can't directly test cache, but verify it still works)
+remembrall_debug "second message"
+LINES=$(grep -c "message" "$HOME/.remembrall/debug.log" 2>/dev/null || echo 0)
+assert_eq "debug caching: both messages logged" "2" "$LINES"
+
+# Enable via env var
+rm -f "$HOME/.remembrall/debug.log"
+rm -f "$HOME/.remembrall/config.json"
+unset _REMEMBRALL_DEBUG_CACHED 2>/dev/null || true
+REMEMBRALL_DEBUG=1 remembrall_debug "env debug message"
+if [ -f "$HOME/.remembrall/debug.log" ] && grep -q "env debug message" "$HOME/.remembrall/debug.log" 2>/dev/null; then
+  printf "${GREEN}  PASS${RESET} REMEMBRALL_DEBUG=1 enables logging\n"
+  PASS=$((PASS + 1))
+else
+  printf "${RED}  FAIL${RESET} REMEMBRALL_DEBUG=1 should enable logging\n"
+  FAIL=$((FAIL + 1))
+fi
+
+rm -f "$HOME/.remembrall/debug.log"
+rm -f "$HOME/.remembrall/config.json"
+unset _REMEMBRALL_DEBUG_CACHED 2>/dev/null || true
+
+# ── format_version in frontmatter ─────────────────────────────────
+echo ""
+echo "format_version in frontmatter:"
+
+TEST_CWD_FV="$TMPDIR_ROOT/format-version-test"
+mkdir -p "$TEST_CWD_FV"
+
+# Test precompact-handoff.sh includes format_version
+FV_TRANSCRIPT="$TMPDIR_ROOT/fv_transcript.jsonl"
+echo '{"type":"human","content":"test format version"}' > "$FV_TRANSCRIPT"
+echo '{"type":"assistant","message":{"model":"claude-sonnet-4-6"},"content":[{"type":"text","text":"OK working on this now."}]}' >> "$FV_TRANSCRIPT"
+
+echo '{"session_id":"test-fv-sess","cwd":"'"$TEST_CWD_FV"'","transcript_path":"'"$FV_TRANSCRIPT"'"}' | \
+  bash "$PLUGIN_ROOT/hooks/precompact-handoff.sh" 2>/dev/null || true
+
+FV_HANDOFF_DIR=$(remembrall_handoff_dir "$TEST_CWD_FV")
+FV_HANDOFF_FILE="$FV_HANDOFF_DIR/handoff-test-fv-sess.md"
+
+if [ -f "$FV_HANDOFF_FILE" ]; then
+  FV_VAL=$(remembrall_frontmatter_get "$FV_HANDOFF_FILE" "format_version" 2>/dev/null)
+  assert_eq "precompact handoff has format_version 2" "2" "$FV_VAL"
+else
+  printf "${RED}  FAIL${RESET} precompact handoff file not created\n"
+  FAIL=$((FAIL + 1))
+fi
+
+# Test handoff-create.sh includes format_version
+FV_CREATED_PATH=$(echo "# Test handoff content" | bash "$PLUGIN_ROOT/scripts/handoff-create.sh" \
+  --cwd "$TEST_CWD_FV" --session-id "test-fv-sess3" 2>/dev/null) || true
+
+if [ -n "$FV_CREATED_PATH" ] && [ -f "$FV_CREATED_PATH" ]; then
+  FV_VAL2=$(remembrall_frontmatter_get "$FV_CREATED_PATH" "format_version" 2>/dev/null)
+  assert_eq "skill handoff has format_version 2" "2" "$FV_VAL2"
+else
+  printf "${RED}  FAIL${RESET} skill handoff file not created (path: %s)\n" "${FV_CREATED_PATH:-empty}"
+  FAIL=$((FAIL + 1))
+fi
+
+rm -rf "$TEST_CWD_FV"
+
+# ── Recency window config ────────────────────────────────────────
+echo ""
+echo "Recency window config:"
+
+remembrall_config_set "recency_window" "120" 2>/dev/null && STATUS=0 || STATUS=1
+assert_eq "valid recency_window accepted" "0" "$STATUS"
+VAL=$(remembrall_config "recency_window" "60")
+assert_eq "recency_window stored correctly" "120" "$VAL"
+
+remembrall_config_set "recency_window" "0" 2>/dev/null && STATUS=0 || STATUS=1
+assert_eq "zero recency_window rejected" "1" "$STATUS"
+
+remembrall_config_set "recency_window" "abc" 2>/dev/null && STATUS=0 || STATUS=1
+assert_eq "non-numeric recency_window rejected" "1" "$STATUS"
+
+rm -f "$HOME/.remembrall/config.json"
+
+# ── Uninstall script ──────────────────────────────────────────────
+echo ""
+echo "Uninstall script (dry run):"
+
+# Set up state to uninstall
+mkdir -p "$HOME/.claude"
+echo '{"statusLine":{"command":"CTX_DIR=\"/tmp/claude-context-pct\"; echo ctx"}}' > "$HOME/.claude/settings.json"
+mkdir -p "$HOME/.remembrall/handoffs/abc"
+echo "test" > "$HOME/.remembrall/handoffs/abc/handoff-test.md"
+echo '{}' > "$HOME/.remembrall/config.json"
+mkdir -p "/tmp/remembrall-nudges"
+echo "test" > "/tmp/remembrall-nudges/uninstall-test"
+
+# Dry run should not remove anything
+OUTPUT=$(bash "$PLUGIN_ROOT/scripts/remembrall-uninstall.sh" --dry-run 2>&1)
+assert_match "dry run header" "DRY RUN" "$OUTPUT"
+
+if [ -f "$HOME/.remembrall/config.json" ]; then
+  printf "${GREEN}  PASS${RESET} dry run: config.json preserved\n"
+  PASS=$((PASS + 1))
+else
+  printf "${RED}  FAIL${RESET} dry run: config.json should not be removed\n"
+  FAIL=$((FAIL + 1))
+fi
+
+# Real run should clean up
+OUTPUT=$(bash "$PLUGIN_ROOT/scripts/remembrall-uninstall.sh" 2>&1)
+assert_match "uninstall complete message" "Uninstall complete" "$OUTPUT"
+
+if [ ! -d "$HOME/.remembrall" ]; then
+  printf "${GREEN}  PASS${RESET} real run: ~/.remembrall removed\n"
+  PASS=$((PASS + 1))
+else
+  printf "${RED}  FAIL${RESET} real run: ~/.remembrall should be removed\n"
+  FAIL=$((FAIL + 1))
+fi
+
+if [ ! -f "/tmp/remembrall-nudges/uninstall-test" ]; then
+  printf "${GREEN}  PASS${RESET} real run: temp files cleaned\n"
+  PASS=$((PASS + 1))
+else
+  printf "${RED}  FAIL${RESET} real run: temp files should be cleaned\n"
+  FAIL=$((FAIL + 1))
+fi
+
+# Clean up settings backup
+rm -f "$HOME/.claude/settings.json" "$HOME/.claude/settings.json.remembrall-backup"
+
+# ═══════════════════════════════════════════════════════════════════
+echo ""
 echo "─────────────────"
 printf "Results: ${GREEN}%d passed${RESET}, ${RED}%d failed${RESET}\n" "$PASS" "$FAIL"
 

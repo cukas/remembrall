@@ -4,38 +4,19 @@ Clean up all remembrall data and remove the bridge from settings.json.
 
 ## Steps
 
-1. **Remove bridge from settings.json** — Run this command to strip the bridge snippet:
+1. **Preview what will be removed** — Run a dry run first:
 
 ```bash
-SETTINGS="$HOME/.claude/settings.json"
-if [ -f "$SETTINGS" ] && grep -q "claude-context-pct" "$SETTINGS" 2>/dev/null; then
-  CURRENT=$(jq -r '.statusLine.command // empty' "$SETTINGS")
-  if [ -n "$CURRENT" ]; then
-    # Remove the bridge snippet (everything from CTX_DIR= to the next semicolon after 2>/dev/null;)
-    CLEANED=$(printf '%s' "$CURRENT" | sed 's/;* *CTX_DIR="\/tmp\/claude-context-pct"[^;]*;//g' | sed 's/;* *session_id=\$(echo "\$input" | jq -r[^;]*;//g' | sed 's/;* *printf "%s" "\$remaining" > "\$CTX_DIR\/[^;]*;//g' | sed 's/;* *mkdir -p "\$CTX_DIR"[^;]*;//g')
-    if [ -n "$CLEANED" ] && [ "$CLEANED" != "$CURRENT" ]; then
-      jq --arg cmd "$CLEANED" '.statusLine.command = $cmd' "$SETTINGS" > "${SETTINGS}.tmp" && mv "${SETTINGS}.tmp" "$SETTINGS"
-      echo "Bridge removed from settings.json"
-    else
-      echo "Could not cleanly remove bridge — you may need to edit ~/.claude/settings.json manually"
-      echo "Look for 'claude-context-pct' in the statusLine.command and remove that section"
-    fi
-  fi
-else
-  echo "No bridge found in settings.json"
-fi
+bash "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/plugins/remembrall@cukas}/scripts/remembrall-uninstall.sh" --dry-run
 ```
 
-2. **Clean up data directories:**
+2. **Run the uninstall** — If the preview looks correct, run without --dry-run:
 
 ```bash
-rm -rf ~/.remembrall
-rm -rf /tmp/remembrall-*
-rm -rf /tmp/claude-context-pct
-echo "Remembrall data cleaned up"
+bash "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/plugins/remembrall@cukas}/scripts/remembrall-uninstall.sh"
 ```
 
-3. **Uninstall the plugin:**
+3. **Uninstall the plugin itself:**
 
 ```bash
 claude plugin uninstall remembrall@cukas

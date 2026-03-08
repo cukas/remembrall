@@ -3,6 +3,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+export REMEMBRALL_HOOK="stop-check"
 source "$SCRIPT_DIR/lib.sh"
 
 remembrall_require_jq

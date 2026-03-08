@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # SessionStart hook: auto-configures bridge + injects handoff content on resume
 # Only resumes own session's handoff — never picks up other sessions' handoffs
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+export REMEMBRALL_HOOK="session-resume"
 source "$SCRIPT_DIR/lib.sh"
 
 remembrall_require_jq
@@ -12,6 +14,8 @@ INPUT=$(cat)
 SOURCE=$(echo "$INPUT" | jq -r '.source // empty')
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty')
 CWD=$(echo "$INPUT" | jq -r '.cwd // empty')
+
+remembrall_debug "source=${SOURCE} session_id=${SESSION_ID} cwd=${CWD}"
 
 # Exit if CWD not available
 if [ -z "$CWD" ]; then
@@ -46,11 +50,20 @@ _remembrall_ensure_bridge() {
     jq --arg cmd "$bridge_cmd" '.statusLine.command = $cmd' "$settings_file" > "$tmp" 2>/dev/null
     if [ $? -eq 0 ] && [ -s "$tmp" ]; then
       mv "$tmp" "$settings_file"
+      remembrall_debug "bridge status line created in settings.json"
       echo "Remembrall: bridge status line created in settings.json" >&2
     else
       rm -f "$tmp"
     fi
     return 0
+  fi
+
+  # Defensive check: if another plugin owns the status line command and it
+  # doesn't reference standard variables (remaining, context_remaining),
+  # log a warning and skip — don't clobber another plugin's status line.
+  if ! echo "$has_statusline" | grep -qE '(remaining|context_remaining)' 2>/dev/null; then
+    remembrall_debug "WARNING: statusLine.command exists but doesn't reference context variables — another plugin may own it. Appending bridge with care."
+    echo "Remembrall: existing statusLine detected — appending bridge (won't overwrite)" >&2
   fi
 
   # Check if session_id is already extracted in the status line
@@ -78,6 +91,7 @@ _remembrall_ensure_bridge() {
   jq --arg cmd "$new_command" '.statusLine.command = $cmd' "$settings_file" > "$tmp" 2>/dev/null
   if [ $? -eq 0 ] && [ -s "$tmp" ]; then
     mv "$tmp" "$settings_file"
+    remembrall_debug "bridge auto-configured in settings.json"
     echo "Remembrall: bridge auto-configured in settings.json" >&2
   else
     rm -f "$tmp"
@@ -121,13 +135,15 @@ if [ -n "$SESSION_ID" ] && [ -f "$HANDOFF_DIR/handoff-${SESSION_ID}.md" ]; then
 fi
 
 # Recency fallback: if own-session handoff not found, check for one created
-# in the last 60s. Handles /handoff with timestamp ID (CLAUDE_SESSION_ID unavailable).
+# within the recency window. Handles /handoff with timestamp ID (CLAUDE_SESSION_ID unavailable).
 # Verify frontmatter session_id matches to prevent claiming another session's handoff.
+RECENCY_WINDOW=$(remembrall_config "recency_window" "60" 2>/dev/null)
+[[ "$RECENCY_WINDOW" =~ ^[0-9]+$ ]] || RECENCY_WINDOW=60
 if [ -z "$HANDOFF_FILE" ]; then
   for f in "$HANDOFF_DIR"/handoff-*.md; do
     [ -f "$f" ] || continue
     _age=$(remembrall_file_age "$f")
-    if [ "$_age" -lt 60 ]; then
+    if [ "$_age" -lt "$RECENCY_WINDOW" ]; then
       # If we have a session ID, verify the handoff's frontmatter matches
       if [ -n "$SESSION_ID" ]; then
         fm_sid=$(remembrall_frontmatter_get "$f" "session_id" 2>/dev/null)
@@ -157,6 +173,7 @@ fi
 
 # Atomic claim: move before read to prevent TOCTOU race with concurrent sessions
 CLAIMED_FILE="${HANDOFF_FILE}.claimed-$$"
+remembrall_debug "claiming handoff: $(basename "$HANDOFF_FILE")"
 mv "$HANDOFF_FILE" "$CLAIMED_FILE" 2>/dev/null || exit 0
 
 # Read handoff content
