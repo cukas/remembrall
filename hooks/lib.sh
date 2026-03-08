@@ -857,12 +857,45 @@ remembrall_config() {
   fi
 }
 
+# Validate config values before writing
+# Returns 0 if valid, 1 if invalid (prints error to stderr)
+remembrall_config_validate() {
+  local key="$1"
+  local value="$2"
+  case "$key" in
+    retention_hours)
+      if ! [[ "$value" =~ ^[0-9]+$ ]] || [ "$value" -eq 0 ]; then
+        echo "remembrall: invalid retention_hours '$value' — must be a positive integer" >&2
+        return 1
+      fi
+      ;;
+    max_transcript_kb)
+      if ! [[ "$value" =~ ^[0-9]+$ ]] || [ "$value" -eq 0 ]; then
+        echo "remembrall: invalid max_transcript_kb '$value' — must be a positive integer" >&2
+        return 1
+      fi
+      ;;
+    autonomous_mode|git_integration|team_handoffs)
+      if [ "$value" != "true" ] && [ "$value" != "false" ]; then
+        echo "remembrall: invalid $key '$value' — must be true or false" >&2
+        return 1
+      fi
+      ;;
+  esac
+  return 0
+}
+
 # Write a config value to ~/.remembrall/config.json
 # Creates the file and directory if they don't exist
 remembrall_config_set() {
   local key="$1"
   local value="$2"
   local config_file="$HOME/.remembrall/config.json"
+
+  # Validate before writing
+  if ! remembrall_config_validate "$key" "$value"; then
+    return 1
+  fi
 
   mkdir -p "$(dirname "$config_file")"
 

@@ -1337,6 +1337,42 @@ fi
 
 rm -rf "$TEST_CWD_PIPE"
 
+# ── Config validation ─────────────────────────────────────────────
+echo ""
+echo "Config validation:"
+
+# Valid values should succeed
+remembrall_config_set "retention_hours" "48" 2>/dev/null && STATUS=0 || STATUS=1
+assert_eq "valid retention_hours accepted" "0" "$STATUS"
+VAL=$(remembrall_config "retention_hours" "72")
+assert_eq "retention_hours stored correctly" "48" "$VAL"
+
+remembrall_config_set "max_transcript_kb" "2000" 2>/dev/null && STATUS=0 || STATUS=1
+assert_eq "valid max_transcript_kb accepted" "0" "$STATUS"
+
+# Invalid values should be rejected
+remembrall_config_set "retention_hours" "-5" 2>/dev/null && STATUS=0 || STATUS=1
+assert_eq "negative retention_hours rejected" "1" "$STATUS"
+
+remembrall_config_set "retention_hours" "banana" 2>/dev/null && STATUS=0 || STATUS=1
+assert_eq "non-numeric retention_hours rejected" "1" "$STATUS"
+
+remembrall_config_set "retention_hours" "0" 2>/dev/null && STATUS=0 || STATUS=1
+assert_eq "zero retention_hours rejected" "1" "$STATUS"
+
+remembrall_config_set "max_transcript_kb" "abc" 2>/dev/null && STATUS=0 || STATUS=1
+assert_eq "non-numeric max_transcript_kb rejected" "1" "$STATUS"
+
+remembrall_config_set "autonomous_mode" "maybe" 2>/dev/null && STATUS=0 || STATUS=1
+assert_eq "non-boolean autonomous_mode rejected" "1" "$STATUS"
+
+remembrall_config_set "autonomous_mode" "true" 2>/dev/null && STATUS=0 || STATUS=1
+assert_eq "valid boolean autonomous_mode accepted" "0" "$STATUS"
+
+# Clean up
+remembrall_config_set "retention_hours" "72" 2>/dev/null
+remembrall_config_set "autonomous_mode" "false" 2>/dev/null
+
 # ═══════════════════════════════════════════════════════════════════
 echo ""
 echo "─────────────────"
