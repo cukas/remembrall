@@ -1,0 +1,67 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+
+## [2.3.1] - 2026-03-08
+
+### Fixed
+- Critical: `local` keyword used outside function in precompact-handoff.sh — silently disabled skill-generated handoff overwrite protection
+- Critical: Missing timeouts on UserPromptSubmit and SessionStart hooks — could block indefinitely on large transcripts
+- Fallback estimator fired when bridge was temporarily missing after compaction, showing wildly wrong estimates
+- JSON injection risk: autonomous skill name not escaped before JSON interpolation
+- Fragile sed-based bridge injection replaced with safe jq string concatenation
+- Growth tracking files in /tmp accumulated without cleanup
+- Standardized `set -euo pipefail` across all hook scripts
+
+### Added
+- GitHub Actions CI with shellcheck linting and cross-platform tests (ubuntu + macos)
+- Config validation for retention_hours, max_transcript_kb, and boolean settings
+- `/remembrall-uninstall` command for clean removal
+
+## [2.3.0] - 2026-03-06
+
+### Added
+- Auto-calibrating context estimation derived from bridge data — no compaction events needed to learn context window size
+- Bridge auto-configured on first run (statusLine added to settings.json automatically)
+- Structural JSONL transcript parsing for accurate content byte extraction
+- Growth tracking per prompt for trend-aware context predictions
+- Self-correcting feedback loop: calibration pairs stored and refined over sessions
+- Model detection for per-model calibration profiles
+- DRY refactor with shared `remembrall_extract_content_bytes` helper
+- 147 new tests for calibration and estimation logic
+
+### Fixed
+- Bridge staleness timeout removed — bridge now invalidated only on compact/clear, not on elapsed time
+- Content_max formula corrected (was missing /100 factor)
+- Estimation reframed as two-branch strategy (bridge vs. fallback), not four sequential layers
+
+## [2.2.0] - 2026-03-06
+
+### Added
+- Slim nudge messages: cut from ~600 tokens to <100 tokens each — full handoff template moved into `/handoff` skill
+- Stop-check enforcement: handoff required when context is below 40%; suggests `/clear + /replay` if handoff already exists
+- Failed Approaches section in handoff template — captures what was tried, the error, and why it failed
+- Prior Incantato spell easter egg: shows how many times `/handoff` was run in the current session
+- Crystal ball gauge for visual context status
+
+### Changed
+- Git history cleaned: 50 commits squashed into 9 logical units
+
+## [2.0.0] - 2026-03-05
+
+### Added
+- Zero-setup experience: self-calibrating transcript estimator learns context window size after 1–2 compaction events
+- Session journals: at 60% context remaining, nudges Claude to maintain a running journal checkpoint
+- Git patch snapshots: captures uncommitted changes for session-touched files in `~/.remembrall/patches/`
+- Team handoffs: share handoffs via project-local `.remembrall/handoffs/` directory
+- Smart replay: `/replay` verifies git state, checks file existence, warns if HEAD moved, offers patch restore
+- Handoff chains: each handoff links to predecessor via `previous_session` for linked session history
+- Session goal extraction: captures first user message as session goal in auto-generated handoffs
+- JSON frontmatter: handoff metadata switched from YAML to JSON, parsed with `jq`
+- Global config: persistent settings at `~/.remembrall/config.json` for git integration and team handoffs
+- Five-layer protection system: journal checkpoint (60%), warning (30%), urgent (20%), safety net (PreCompact), auto-resume (SessionStart)
+- Plan mode nudges with prescriptive methodology
+- Autonomous mode for unattended sessions
+- Session isolation with scoped bridges and handoff alignment
