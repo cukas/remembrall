@@ -42,7 +42,7 @@ printf "%s" "$remaining" > "$CTX_DIR/${session_id}" 2>/dev/null;
 
 ## Important Notes
 
-- The bridge is cross-platform: uses `md5` on macOS, `md5sum` on Linux
+- The plugin is cross-platform: uses `md5` on macOS, `md5sum` on Linux for handoff directory hashing
 - The bridge writes to `/tmp/` so data is ephemeral (cleared on reboot)
 - Since v2.3.0, the `session-resume.sh` hook auto-configures the bridge in settings.json on first session start. This command is a manual fallback for customization or troubleshooting.
 - If auto-setup failed and the user doesn't have a status line configured at all, this command guides them through the edit.
@@ -78,14 +78,14 @@ After the bridge and gauge are set up, present these optional features to the us
 
    If yes, run:
    ```bash
-   source "${CLAUDE_PLUGIN_ROOT}/hooks/lib.sh"
+   source "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/plugins/remembrall}/hooks/lib.sh"
    remembrall_config_set "git_integration" "true"
    echo "Git integration enabled"
    ```
 
    If no, run:
    ```bash
-   source "${CLAUDE_PLUGIN_ROOT}/hooks/lib.sh"
+   source "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/plugins/remembrall}/hooks/lib.sh"
    remembrall_config_set "git_integration" "false"
    echo "Git integration disabled"
    ```
@@ -94,7 +94,7 @@ After the bridge and gauge are set up, present these optional features to the us
 
    If yes, run:
    ```bash
-   source "${CLAUDE_PLUGIN_ROOT}/hooks/lib.sh"
+   source "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/plugins/remembrall}/hooks/lib.sh"
    remembrall_config_set "team_handoffs" "true"
    echo "Team handoffs enabled"
    ```
@@ -102,7 +102,7 @@ After the bridge and gauge are set up, present these optional features to the us
 
    If no, run:
    ```bash
-   source "${CLAUDE_PLUGIN_ROOT}/hooks/lib.sh"
+   source "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/plugins/remembrall}/hooks/lib.sh"
    remembrall_config_set "team_handoffs" "false"
    echo "Team handoffs disabled"
    ```

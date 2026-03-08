@@ -8,7 +8,7 @@ description: Diagnostic command — check context %, bridge status, handoff file
 Run the diagnostic script and show the output to the user:
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT}/scripts/remembrall-status.sh"
+bash "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/plugins/remembrall}/scripts/remembrall-status.sh"
 ```
 
 If anything shows NOT FOUND or MISSING, suggest the user run `/setup-remembrall`.

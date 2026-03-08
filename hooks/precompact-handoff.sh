@@ -13,8 +13,11 @@ TRANSCRIPT_PATH=$(echo "$INPUT" | jq -r '.transcript_path // empty')
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // "unknown"')
 CWD=$(echo "$INPUT" | jq -r '.cwd // empty')
 
-# Only act on automatic compaction (context pressure)
-if [ "$TRIGGER" != "precompact_auto" ]; then
+# Act on automatic compaction (context pressure) — both system-triggered and
+# internally-triggered (from context-monitor.sh's preemptive safety net).
+# System PreCompact events may send no trigger or a different value.
+# Only skip if trigger is explicitly a non-compaction value (e.g., manual).
+if [ "$TRIGGER" = "manual" ]; then
   exit 0
 fi
 
@@ -43,10 +46,11 @@ if [ -f "$HANDOFF_FILE" ]; then
     echo "Handoff already exists and is recent (${FILE_AGE}s old). Skipping." >&2
     exit 0
   fi
-  # Never overwrite a skill-generated handoff — it is higher quality
-  if ! grep -q '"type".*"auto-generated"' "$HANDOFF_FILE" 2>/dev/null && \
-     ! grep -q "type: auto-generated" "$HANDOFF_FILE" 2>/dev/null && \
-     ! grep -q "Type: Auto-generated" "$HANDOFF_FILE" 2>/dev/null; then
+  # Never overwrite a skill-generated handoff — it is higher quality.
+  # Auto-generated handoffs have type: auto-generated in frontmatter.
+  local existing_type
+  existing_type=$(remembrall_frontmatter_get "$HANDOFF_FILE" "type" 2>/dev/null)
+  if [ "$existing_type" != "auto-generated" ]; then
     echo "Handoff exists and was skill-generated. Preserving." >&2
     exit 0
   fi

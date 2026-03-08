@@ -66,8 +66,8 @@ Create a structured handoff document that any Claude instance can read to resume
 
 3. **Confirm to the user** — Tell them the handoff is saved and they can `/clear` or switch to another Claude instance. Show:
    - Brief summary of what was captured
-   - The output path from the script
-   - Whether team copy was created (check stderr for `team:` prefix)
+   - The output path from the script (printed to stdout)
+   - Whether team handoffs are enabled (check `remembrall_config "team_handoffs"` — if `true`, a team copy was also saved to `.remembrall/handoffs/` in the project directory)
 
 ## Rules
 - Be concise but complete — the next instance has zero context

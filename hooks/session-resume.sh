@@ -111,6 +111,13 @@ if [ ! -d "$HANDOFF_DIR" ]; then
   exit 0
 fi
 
+# Clean up orphaned .claimed-PID files older than 5 minutes
+for f in "$HANDOFF_DIR"/handoff-*.md.claimed-*; do
+  [ -f "$f" ] || continue
+  local_age=$(remembrall_file_age "$f")
+  [ "$local_age" -gt 300 ] && rm -f "$f"
+done
+
 # Only resume own session's handoff — use /replay for other sessions' handoffs
 HANDOFF_FILE=""
 if [ -n "$SESSION_ID" ] && [ -f "$HANDOFF_DIR/handoff-${SESSION_ID}.md" ]; then
@@ -119,11 +126,19 @@ fi
 
 # Recency fallback: if own-session handoff not found, check for one created
 # in the last 60s. Handles /handoff with timestamp ID (CLAUDE_SESSION_ID unavailable).
+# Verify frontmatter session_id matches to prevent claiming another session's handoff.
 if [ -z "$HANDOFF_FILE" ]; then
   for f in "$HANDOFF_DIR"/handoff-*.md; do
     [ -f "$f" ] || continue
     local_age=$(remembrall_file_age "$f")
     if [ "$local_age" -lt 60 ]; then
+      # If we have a session ID, verify the handoff's frontmatter matches
+      if [ -n "$SESSION_ID" ]; then
+        fm_sid=$(remembrall_frontmatter_get "$f" "session_id" 2>/dev/null)
+        if [ -n "$fm_sid" ] && [ "$fm_sid" != "$SESSION_ID" ]; then
+          continue  # belongs to another session
+        fi
+      fi
       HANDOFF_FILE="$f"
       break
     fi

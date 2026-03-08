@@ -37,12 +37,12 @@ Show the user this reference:
 
 ```
 100% ████████████████████  — working normally
- 60% ████████████░░░░░░░░  — journal checkpoint (suggests /handoff snapshot)
+ 60% ████████████░░░░░░░░  — nudge: suggests /handoff (fires once in 31-60% band)
  30% ██████░░░░░░░░░░░░░░  — plan mode (or /handoff if autonomous)
- 20% ████░░░░░░░░░░░░░░░░  — urgent plan mode (or immediate /handoff)
+ 20% ████░░░░░░░░░░░░░░░░  — URGENT plan mode (or immediate /handoff)
   0% ░░░░░░░░░░░░░░░░░░░░  — auto-compaction safety net fires
 ```
 
-**Attended** (default): At 30%, Claude writes a plan → enters plan mode → user clicks "clear context" → fresh start.
+**Attended** (default): At <=30%, Claude runs `/handoff` then enters plan mode. At <=20%, same but with urgent priority. User clicks "clear context" → fresh start.
 
-**Autonomous** (`/autonomous` to toggle): At 30%, Claude runs `/handoff` → continues working → auto-compaction recycles context automatically. No human needed.
+**Autonomous** (`/autonomous` to toggle): At <=30%, Claude runs `/handoff` → continues working → auto-compaction recycles context automatically. No human needed.

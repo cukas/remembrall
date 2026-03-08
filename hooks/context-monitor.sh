@@ -147,7 +147,7 @@ if remembrall_gt "$REMAINING" 30; then
     exit 0
   fi
   echo "journal" > "$NUDGE_FILE"
-  GAUGE=$(remembrall_gauge "$REMAINING")
+  GAUGE=$(remembrall_gauge_plain "$REMAINING")
   SPELL="Spells: Expecto Patronum=/handoff, Lumos=/status, Accio=/replay, Prior Incantato=handoff count this session (only if user speaks HP)"
   cat << EOF
 {
@@ -191,7 +191,7 @@ if remembrall_le "$REMAINING" 20; then
     exit 0
   fi
   echo "urgent" > "$NUDGE_FILE"
-  GAUGE=$(remembrall_gauge "$REMAINING")
+  GAUGE=$(remembrall_gauge_plain "$REMAINING")
   if [ "$IS_AUTONOMOUS" = true ]; then
     cat << EOF
 {
@@ -210,11 +210,11 @@ EOF
 fi
 
 # <=30% — WARNING
-if [ "$LAST_NUDGE" = "warning" ]; then
+if [ "$LAST_NUDGE" = "warning" ] || [ "$LAST_NUDGE" = "urgent" ]; then
   exit 0
 fi
 echo "warning" > "$NUDGE_FILE"
-GAUGE=$(remembrall_gauge "$REMAINING")
+GAUGE=$(remembrall_gauge_plain "$REMAINING")
 if [ "$IS_AUTONOMOUS" = true ]; then
   cat << EOF
 {

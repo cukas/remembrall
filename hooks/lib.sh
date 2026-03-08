@@ -188,6 +188,7 @@ remembrall_estimate_tokens() {
 
   # Integer arithmetic: multiply by 10 to handle one decimal place
   # e.g., 4.2 → 42, then divide result by 10
+  # IMPORTANT: only works for values with exactly one decimal digit (e.g., 4.2, 3.8)
   local bpt_int
   bpt_int=$(printf '%s' "$bpt_str" | sed 's/\.//')
   [ -z "$bpt_int" ] && bpt_int=40
@@ -321,6 +322,44 @@ remembrall_calibrated_content_max() {
   echo "$avg"
 }
 
+# ─── Calibration File Locking ────────────────────────────────────
+
+# Atomic read-modify-write for calibration.json.
+# Uses flock when available, falls back to mkdir-based lock.
+# Usage: remembrall_locked_cal_update 'jq expression' [--argjson k v ...]
+remembrall_locked_cal_update() {
+  local cal_file="$HOME/.remembrall/calibration.json"
+  local lock_file="${cal_file}.lock"
+  mkdir -p "$HOME/.remembrall"
+
+  # Initialize if missing — canonical schema with all top-level keys
+  [ ! -f "$cal_file" ] && echo '{"samples":[],"models":{},"pairs":{}}' > "$cal_file"
+
+  local tmp
+  tmp=$(mktemp "${cal_file}.XXXXXX")
+
+  if command -v flock >/dev/null 2>&1; then
+    (
+      flock -x -w 5 200 || { rm -f "$tmp"; return 1; }
+      jq "$@" "$cal_file" > "$tmp" 2>/dev/null && mv "$tmp" "$cal_file" || rm -f "$tmp"
+    ) 200>"$lock_file"
+  else
+    # mkdir is atomic on POSIX — use as spinlock with timeout
+    local attempts=0
+    while ! mkdir "$lock_file" 2>/dev/null; do
+      attempts=$((attempts + 1))
+      [ "$attempts" -gt 50 ] && { rm -f "$tmp"; return 1; }
+      # Clean stale locks (>10s old)
+      local lock_age
+      lock_age=$(remembrall_file_age "$lock_file" 2>/dev/null)
+      [ "$lock_age" -gt 10 ] 2>/dev/null && rmdir "$lock_file" 2>/dev/null
+      sleep 0.1
+    done
+    jq "$@" "$cal_file" > "$tmp" 2>/dev/null && mv "$tmp" "$cal_file" || rm -f "$tmp"
+    rmdir "$lock_file" 2>/dev/null
+  fi
+}
+
 # ─── Bridge-Derived Content Max ───────────────────────────────────
 
 # Derive content_max from bridge truth and store for future estimation.
@@ -345,17 +384,11 @@ remembrall_store_derived_content_max() {
   local derived=$(( content_bytes * 100 / used_pct ))
   [ "$derived" -le 0 ] 2>/dev/null && return
 
-  local cal_file="$HOME/.remembrall/calibration.json"
-  mkdir -p "$HOME/.remembrall"
-  [ ! -f "$cal_file" ] && echo '{"samples":[],"models":{}}' > "$cal_file"
-
-  local tmp
-  tmp=$(mktemp "${cal_file}.XXXXXX")
-  jq --argjson d "$derived" --arg m "$model_name" '
-    .models //= {} |
+  remembrall_locked_cal_update \
+    --argjson d "$derived" --arg m "$model_name" \
+    '.models //= {} |
     .models[$m] //= {} |
-    .models[$m].derived_content_max = ((.models[$m].derived_content_max // []) + [$d])[-5:]
-  ' "$cal_file" > "$tmp" 2>/dev/null && mv "$tmp" "$cal_file" || rm -f "$tmp"
+    .models[$m].derived_content_max = ((.models[$m].derived_content_max // []) + [$d])[-5:]'
 }
 
 # ─── Bridge-Paired Calibration ────────────────────────────────────
@@ -395,25 +428,17 @@ remembrall_log_calibration_pair() {
   msg_count=$(wc -l < "$transcript_path" 2>/dev/null | tr -d ' ')
   [ -z "$msg_count" ] && msg_count=0
 
-  local cal_file="$HOME/.remembrall/calibration.json"
-  mkdir -p "$HOME/.remembrall"
-
-  if [ ! -f "$cal_file" ]; then
-    echo '{"samples":[],"models":{},"pairs":{}}' > "$cal_file"
-  fi
-
   local timestamp
   timestamp=$(date +%s)
 
-  local tmp
-  tmp=$(mktemp "${cal_file}.XXXXXX")
-  jq --argjson cb "$content_bytes" \
-     --argjson bp "$bridge_pct" \
-     --argjson sp "$structural_pct" \
-     --arg m "$model_name" \
-     --argjson mc "$msg_count" \
-     --argjson ts "$timestamp" '
-    .pairs //= {} |
+  remembrall_locked_cal_update \
+    --argjson cb "$content_bytes" \
+    --argjson bp "$bridge_pct" \
+    --argjson sp "$structural_pct" \
+    --arg m "$model_name" \
+    --argjson mc "$msg_count" \
+    --argjson ts "$timestamp" \
+    '.pairs //= {} |
     .pairs[$m] //= [] |
     .pairs[$m] += [{
       content_bytes: $cb,
@@ -423,8 +448,7 @@ remembrall_log_calibration_pair() {
       msg_count: $mc,
       timestamp: $ts
     }] |
-    .pairs[$m] = .pairs[$m][-20:]
-  ' "$cal_file" > "$tmp" 2>/dev/null && mv "$tmp" "$cal_file" || rm -f "$tmp"
+    .pairs[$m] = .pairs[$m][-20:]'
 }
 
 # Compute correction offset from calibration pairs for a model.
@@ -513,13 +537,6 @@ remembrall_calibrate() {
     return 0
   fi
 
-  local cal_file="$HOME/.remembrall/calibration.json"
-  mkdir -p "$HOME/.remembrall"
-
-  if [ ! -f "$cal_file" ]; then
-    echo '{"samples":[],"models":{}}' > "$cal_file"
-  fi
-
   # Detect model for per-model calibration
   local model_info model_name
   model_info=$(remembrall_detect_model "$transcript_path")
@@ -530,10 +547,9 @@ remembrall_calibrate() {
   [ -z "$content_bytes" ] && content_bytes=0
 
   # Append samples to global + per-model arrays (keep last 5 each)
-  local tmp
-  tmp=$(mktemp "${cal_file}.XXXXXX")
-  jq --argjson s "$size" --argjson cb "$content_bytes" --arg m "$model_name" '
-    .samples += [$s] |
+  remembrall_locked_cal_update \
+    --argjson s "$size" --argjson cb "$content_bytes" --arg m "$model_name" \
+    '.samples += [$s] |
     .samples = .samples[-5:] |
     (if $cb > 0 then .content_samples = ((.content_samples // []) + [$cb])[-5:] else . end) |
     .models //= {} |
@@ -541,8 +557,7 @@ remembrall_calibrate() {
     .models[$m].samples += [$s] |
     .models[$m].samples = .models[$m].samples[-5:] |
     (if $cb > 0 then .models[$m].content_samples = ((.models[$m].content_samples // []) + [$cb])[-5:] else . end) |
-    .updated = now
-  ' "$cal_file" > "$tmp" 2>/dev/null && mv "$tmp" "$cal_file" || rm -f "$tmp"
+    .updated = now'
 }
 
 # Get calibrated max transcript size in bytes (average of stored samples).
@@ -769,6 +784,26 @@ remembrall_gauge() {
   fi
 
   printf '\033[%sm[%s]\033[0m %s%%' "$color" "$bar" "$pct"
+}
+
+# Plain-text gauge for embedding in JSON (no ANSI escape codes).
+# Usage: remembrall_gauge_plain 42
+remembrall_gauge_plain() {
+  local pct="${1%%.*}"
+  [ -z "$pct" ] && pct=0
+
+  local width=10
+  local filled=$((pct * width / 100))
+  [ "$filled" -gt "$width" ] && filled=$width
+  [ "$filled" -lt 0 ] && filled=0
+  local empty=$((width - filled))
+
+  local bar=""
+  local i
+  for ((i=0; i<filled; i++)); do bar+="█"; done
+  for ((i=0; i<empty; i++)); do bar+="░"; done
+
+  printf '[%s] %s%%' "$bar" "$pct"
 }
 
 # ─── Integer Comparison ──────────────────────────────────────────

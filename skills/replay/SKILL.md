@@ -19,12 +19,14 @@ The handoff file is a **single-use baton**. Read it, verify state, restore patch
    CWD=$(pwd)
    HANDOFF_DIR=$(remembrall_handoff_dir "$CWD")
    TEAM_DIR=$(remembrall_team_handoff_dir "$CWD")
+   # Session ID: env var or published by hook
+   OWN_SID="${CLAUDE_SESSION_ID:-$(remembrall_read_session_id "$CWD" 2>/dev/null)}"
    echo "Personal: $HANDOFF_DIR"
    echo "Team: $TEAM_DIR"
-   echo "Own session: $CLAUDE_SESSION_ID"
+   echo "Own session: $OWN_SID"
    # Check own session first
-   if [ -n "$CLAUDE_SESSION_ID" ] && [ -f "$HANDOFF_DIR/handoff-${CLAUDE_SESSION_ID}.md" ]; then
-     echo "OWN SESSION HANDOFF: $HANDOFF_DIR/handoff-${CLAUDE_SESSION_ID}.md"
+   if [ -n "$OWN_SID" ] && [ -f "$HANDOFF_DIR/handoff-${OWN_SID}.md" ]; then
+     echo "OWN SESSION HANDOFF: $HANDOFF_DIR/handoff-${OWN_SID}.md"
    fi
    # List all available
    ls -lt "$HANDOFF_DIR"/handoff-*.md "$TEAM_DIR"/handoff-*.md 2>/dev/null || echo "No handoffs found"
@@ -37,14 +39,14 @@ The handoff file is a **single-use baton**. Read it, verify state, restore patch
 
 2. **Read the handoff** — Read the selected file's contents.
 
-3. **Delete consumed file** — Single-use baton:
+3. **Parse frontmatter** — If the file starts with `---`, extract structured fields:
+   - `status`, `branch`, `commit`, `patch`, `files`, `tasks`, `team`, `previous_session`
+   - If no frontmatter (legacy handoff), skip verification steps and proceed with markdown-only mode.
+
+4. **Delete consumed file** — Single-use baton:
    ```bash
    rm -f "$HANDOFF_FILE"
    ```
-
-4. **Parse frontmatter** — If the file starts with `---`, extract structured fields:
-   - `status`, `branch`, `commit`, `patch`, `files`, `tasks`, `team`, `type`, `previous_session`
-   - If no frontmatter (legacy handoff), skip verification steps and proceed with markdown-only mode.
 
 5. **Check chain history** — If `previous_session` is present, note it for the briefing. Optionally check if the previous session's handoff still exists (it usually won't — consumed on resume). This gives the user awareness of how many sessions deep they are.
 

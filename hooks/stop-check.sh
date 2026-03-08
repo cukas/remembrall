@@ -52,13 +52,13 @@ if [ -n "$SESSION_ID" ] && [ -n "$CWD" ]; then
   fi
 fi
 
-GAUGE=$(remembrall_gauge "$REMAINING")
-
 if [ "$HANDOFF_EXISTS" = true ]; then
-  # Handoff exists — just suggest /clear + /replay via stderr
+  # Handoff exists — just suggest /clear + /replay via stderr (ANSI OK here)
+  GAUGE=$(remembrall_gauge "$REMAINING")
   echo "Remembrall: ${GAUGE} Context at ${REMAINING}%${ESTIMATED}. Handoff saved. Consider /clear + /replay before new work." >&2
 else
-  # No handoff — enforce handoff creation via additionalContext
+  # No handoff — enforce handoff creation via additionalContext (plain text for JSON)
+  GAUGE=$(remembrall_gauge_plain "$REMAINING")
   cat << EOF
 {
   "additionalContext": "${GAUGE} ${REMAINING}% remaining${ESTIMATED}. You MUST run /handoff before completing this task. Do not stop without saving state."

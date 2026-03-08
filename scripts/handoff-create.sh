@@ -86,7 +86,8 @@ if remembrall_git_enabled "$CWD"; then
   IFS=',' read -ra FILE_ARRAY <<< "$FILES_CSV"
   DIFF_FILES=()
   for fp in "${FILE_ARRAY[@]}"; do
-    fp=$(echo "$fp" | xargs)  # trim whitespace
+    fp="${fp#"${fp%%[![:space:]]*}"}"   # trim leading whitespace
+    fp="${fp%"${fp##*[![:space:]]}"}"  # trim trailing whitespace
     [ -z "$fp" ] && continue
     if [ -f "$fp" ] || git -C "$CWD" ls-files --error-unmatch "$fp" >/dev/null 2>&1; then
       DIFF_FILES+=("$fp")
@@ -186,7 +187,11 @@ COUNTER_DIR="/tmp/remembrall-handoff-count"
 mkdir -p "$COUNTER_DIR"
 COUNTER_FILE="$COUNTER_DIR/$SESSION_ID"
 PREV_COUNT=0
-[ -f "$COUNTER_FILE" ] && PREV_COUNT=$(cat "$COUNTER_FILE" 2>/dev/null || echo 0)
+if [ -f "$COUNTER_FILE" ]; then
+  PREV_COUNT=$(cat "$COUNTER_FILE" 2>/dev/null || echo 0)
+  # Guard against non-numeric content
+  [[ "$PREV_COUNT" =~ ^[0-9]+$ ]] || PREV_COUNT=0
+fi
 echo $((PREV_COUNT + 1)) > "$COUNTER_FILE"
 
 # ─── Output ──────────────────────────────────────────────────────
