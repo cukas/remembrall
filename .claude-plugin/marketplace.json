@@ -8,8 +8,8 @@
   "plugins": [
     {
       "name": "remembrall",
-      "description": "Context-aware session continuity — plan mode, autonomous runs, auto-calibrating estimation, git patches, team handoffs, smart replay, auto-resume",
-      "version": "2.3.0",
+      "description": "Never lose work to context limits — auto-handoff, smart replay, git patches, team sharing",
+      "version": "2.4.0",
       "author": {
         "name": "cukas"
       },

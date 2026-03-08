@@ -7,6 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"
 
 remembrall_require_jq
+remembrall_hook_enabled "precompact-handoff" || exit 0
 
 INPUT=$(cat)
 TRIGGER=$(echo "$INPUT" | jq -r '.trigger // empty')
@@ -141,7 +142,10 @@ if remembrall_git_enabled "$CWD"; then
     if [ -n "$PATCHES_DIR" ]; then
       mkdir -p "$PATCHES_DIR"
       PATCH_FILE="$PATCHES_DIR/patch-${SESSION_ID}.diff"
-      git -C "$CWD" diff HEAD -- "${DIFF_FILES[@]}" 2>/dev/null > "$PATCH_FILE"
+      {
+        git -C "$CWD" diff HEAD -- "${DIFF_FILES[@]}" 2>/dev/null
+        git -C "$CWD" diff --staged -- "${DIFF_FILES[@]}" 2>/dev/null
+      } > "$PATCH_FILE"
       [ ! -s "$PATCH_FILE" ] && { rm -f "$PATCH_FILE"; PATCH_FILE=""; }
     fi
   fi

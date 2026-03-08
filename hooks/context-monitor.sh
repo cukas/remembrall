@@ -6,6 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"
 
 remembrall_require_jq
+remembrall_hook_enabled "context-monitor" || exit 0
 
 INPUT=$(cat)
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // "default"')
@@ -101,8 +102,8 @@ CONTENT_BYTES=""
 MODEL_NAME=""
 if [ -n "$TRANSCRIPT_PATH" ] && [ -f "$TRANSCRIPT_PATH" ]; then
   CONTENT_BYTES=$(remembrall_extract_content_bytes "$TRANSCRIPT_PATH" 2>/dev/null)
-  local_model_info=$(remembrall_detect_model "$TRANSCRIPT_PATH")
-  MODEL_NAME=$(printf '%s' "$local_model_info" | cut -f1)
+  _model_info=$(remembrall_detect_model "$TRANSCRIPT_PATH")
+  MODEL_NAME=$(printf '%s' "$_model_info" | cut -f1)
 fi
 
 # ── Bridge-derived content_max: auto-calibrate per user ──────────
@@ -129,16 +130,16 @@ if [ -n "$TRANSCRIPT_PATH" ] && [ -f "$TRANSCRIPT_PATH" ]; then
     IS_VOLATILE=$(printf '%s' "$GROWTH_RESULT" | cut -f2)
     if [ "$AVG_GROWTH" -gt 0 ] 2>/dev/null; then
       # Get content_max for prompts-until-threshold calculation
-      local_content_max=$(remembrall_calibrated_content_max "$TRANSCRIPT_PATH" 2>/dev/null)
-      if [ -z "$local_content_max" ] || [ "$local_content_max" -eq 0 ] 2>/dev/null; then
+      _content_max=$(remembrall_calibrated_content_max "$TRANSCRIPT_PATH" 2>/dev/null)
+      if [ -z "$_content_max" ] || [ "$_content_max" -eq 0 ] 2>/dev/null; then
         case "$MODEL_NAME" in
-          claude-opus-4-6*|claude-opus-4*)   local_content_max=358400 ;;
-          claude-sonnet-4-6*|claude-sonnet-4*) local_content_max=337920 ;;
-          claude-haiku-4-5*|claude-haiku-4*)  local_content_max=317440 ;;
-          *)                                   local_content_max=337920 ;;
+          claude-opus-4-6*|claude-opus-4*)   _content_max=358400 ;;
+          claude-sonnet-4-6*|claude-sonnet-4*) _content_max=337920 ;;
+          claude-haiku-4-5*|claude-haiku-4*)  _content_max=317440 ;;
+          *)                                   _content_max=337920 ;;
         esac
       fi
-      PROMPTS_LEFT=$(remembrall_prompts_until_threshold "$CONTENT_BYTES" "$AVG_GROWTH" "$local_content_max" 20 2>/dev/null)
+      PROMPTS_LEFT=$(remembrall_prompts_until_threshold "$CONTENT_BYTES" "$AVG_GROWTH" "$_content_max" 20 2>/dev/null)
       if [ -n "$PROMPTS_LEFT" ] && [ "$PROMPTS_LEFT" -gt 0 ] 2>/dev/null; then
         PROMPTS_MSG=" (~${PROMPTS_LEFT} prompts to 20%)"
       fi
@@ -156,10 +157,13 @@ if remembrall_gt "$REMAINING" 30; then
   fi
   echo "journal" > "$NUDGE_FILE"
   GAUGE=$(remembrall_gauge_plain "$REMAINING")
-  SPELL="Spells: Expecto Patronum=/handoff, Lumos=/status, Accio=/replay, Prior Incantato=handoff count this session (only if user speaks HP)"
+  SPELL_LINE=""
+  if [ "$(remembrall_config "easter_eggs" "true")" = "true" ]; then
+    SPELL_LINE=" Spells: Expecto Patronum=/handoff, Lumos=/status, Accio=/replay, Prior Incantato=handoff count this session (only if user speaks HP)"
+  fi
   cat << EOF
 {
-  "additionalContext": "${GAUGE} ${REMAINING}% remaining${ESTIMATED}${PROMPTS_MSG}. Run /handoff to save progress. ${SPELL}"
+  "additionalContext": "${GAUGE} ${REMAINING}% remaining${ESTIMATED}${PROMPTS_MSG}. Run /handoff to save progress.${SPELL_LINE}"
 }
 EOF
   exit 0
@@ -233,10 +237,13 @@ if [ "$IS_AUTONOMOUS" = true ]; then
 EOF
 else
   _create_preemptive_handoff
-  SPELL="Spells: Expecto Patronum=/handoff, Lumos=/status, Accio=/replay, Prior Incantato=handoff count this session (only if user speaks HP)"
+  SPELL_LINE=""
+  if [ "$(remembrall_config "easter_eggs" "true")" = "true" ]; then
+    SPELL_LINE=" Spells: Expecto Patronum=/handoff, Lumos=/status, Accio=/replay, Prior Incantato=handoff count this session (only if user speaks HP)"
+  fi
   cat << EOF
 {
-  "additionalContext": "${GAUGE} ${REMAINING}% remaining${ESTIMATED}${PROMPTS_MSG}. Run /handoff then EnterPlanMode. ${SPELL}"
+  "additionalContext": "${GAUGE} ${REMAINING}% remaining${ESTIMATED}${PROMPTS_MSG}. Run /handoff then EnterPlanMode.${SPELL_LINE}"
 }
 EOF
 fi

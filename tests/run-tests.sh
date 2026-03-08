@@ -571,9 +571,11 @@ OUTPUT=$(echo '{"source":"compact","session_id":"test-resume","cwd":"'"$TEST_CWD
 assert_match "compact resume: injects handoff" "SESSION HANDOFF LOADED" "$OUTPUT"
 assert_match "compact resume: contains task" "Fix the widget" "$OUTPUT"
 
-# Handoff file should be consumed (deleted)
+# Handoff file should be consumed (renamed to .consumed.md)
 [ ! -f "$HANDOFF_DIR/handoff-test-resume.md" ] && R="consumed" || R="exists"
 assert_eq "handoff file consumed after resume" "consumed" "$R"
+[ -f "$HANDOFF_DIR/handoff-test-resume.consumed.md" ] && R="renamed" || R="missing"
+assert_eq "consumed handoff renamed to .consumed.md" "renamed" "$R"
 
 # Cleanup
 rm -rf "$TEST_CWD" "$HANDOFF_DIR"
@@ -747,6 +749,8 @@ OUTPUT=$(echo '{"source":"compact","session_id":"sess-A","cwd":"'"$TEST_CWD"'"}'
 assert_match "sess-A resume loads A" "Handoff A" "$OUTPUT"
 [ ! -f "$HANDOFF_DIR/handoff-sess-A.md" ] && R="consumed" || R="exists"
 assert_eq "sess-A handoff consumed" "consumed" "$R"
+[ -f "$HANDOFF_DIR/handoff-sess-A.consumed.md" ] && R="renamed" || R="missing"
+assert_eq "sess-A consumed handoff renamed" "renamed" "$R"
 [ -f "$HANDOFF_DIR/handoff-sess-B.md" ] && R="preserved" || R="gone"
 assert_eq "sess-B handoff preserved" "preserved" "$R"
 

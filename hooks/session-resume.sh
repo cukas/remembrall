@@ -6,6 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"
 
 remembrall_require_jq
+remembrall_hook_enabled "session-resume" || exit 0
 
 INPUT=$(cat)
 SOURCE=$(echo "$INPUT" | jq -r '.source // empty')
@@ -30,6 +31,9 @@ _remembrall_ensure_bridge() {
   if grep -q "claude-context-pct" "$settings_file" 2>/dev/null; then
     return 0
   fi
+
+  # Backup settings.json before mutation — safety net in case jq produces invalid output
+  cp "$settings_file" "${settings_file}.remembrall-backup" 2>/dev/null || true
 
   # Check if there's a statusLine command to inject into
   local has_statusline
@@ -99,11 +103,15 @@ if [ ! -d "$HANDOFF_DIR" ]; then
   exit 0
 fi
 
-# Clean up orphaned .claimed-PID files older than 5 minutes
-for f in "$HANDOFF_DIR"/handoff-*.md.claimed-*; do
+# Clean up orphaned .claimed-PID and .consumed files
+for f in "$HANDOFF_DIR"/handoff-*.md.claimed-* "$HANDOFF_DIR"/handoff-*.consumed.md; do
   [ -f "$f" ] || continue
-  local_age=$(remembrall_file_age "$f")
-  [ "$local_age" -gt 300 ] && rm -f "$f"
+  _age=$(remembrall_file_age "$f")
+  # claimed files: 5 min; consumed files: 1 hour
+  case "$f" in
+    *.claimed-*) [ "$_age" -gt 300 ] && rm -f "$f" ;;
+    *.consumed*) [ "$_age" -gt 3600 ] && rm -f "$f" ;;
+  esac
 done
 
 # Only resume own session's handoff — use /replay for other sessions' handoffs
@@ -118,8 +126,8 @@ fi
 if [ -z "$HANDOFF_FILE" ]; then
   for f in "$HANDOFF_DIR"/handoff-*.md; do
     [ -f "$f" ] || continue
-    local_age=$(remembrall_file_age "$f")
-    if [ "$local_age" -lt 60 ]; then
+    _age=$(remembrall_file_age "$f")
+    if [ "$_age" -lt 60 ]; then
       # If we have a session ID, verify the handoff's frontmatter matches
       if [ -n "$SESSION_ID" ]; then
         fm_sid=$(remembrall_frontmatter_get "$f" "session_id" 2>/dev/null)
@@ -194,8 +202,8 @@ cat <<EOF
 }
 EOF
 
-# Delete consumed handoff
-rm -f "$CLAIMED_FILE"
+# Rename consumed handoff (preserved for safety; cleaned up after 1 hour)
+mv "$CLAIMED_FILE" "${HANDOFF_FILE%.md}.consumed.md" 2>/dev/null || rm -f "$CLAIMED_FILE"
 
 # Clean up nudge temp files for this session
 if [ -n "$SESSION_ID" ]; then

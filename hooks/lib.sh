@@ -696,14 +696,15 @@ remembrall_track_growth() {
   fi
 
   # Calculate deltas and average growth
-  local prev="" total_delta=0 delta_count=0 last_3_deltas=""
+  local prev="" total_delta=0 delta_count=0
+  local -a recent_deltas=()
   while IFS= read -r val; do
     if [ -n "$prev" ]; then
       local delta=$((val - prev))
       [ "$delta" -lt 0 ] && delta=0
       total_delta=$((total_delta + delta))
       delta_count=$((delta_count + 1))
-      last_3_deltas="$last_3_deltas $delta"
+      recent_deltas+=("$delta")
     fi
     prev="$val"
   done < "$growth_file"
@@ -718,12 +719,11 @@ remembrall_track_growth() {
   if [ "$delta_count" -ge 3 ] && [ "$avg_growth" -gt 0 ]; then
     local volatile_count=0
     local threshold=$((avg_growth * 2))
-    # Get last 3 deltas
-    local last3
-    last3=$(printf '%s\n' $last_3_deltas | tail -3)
-    while IFS= read -r d; do
-      [ "$d" -gt "$threshold" ] 2>/dev/null && volatile_count=$((volatile_count + 1))
-    done <<< "$last3"
+    local start=$(( ${#recent_deltas[@]} > 3 ? ${#recent_deltas[@]} - 3 : 0 ))
+    local i
+    for ((i=start; i<${#recent_deltas[@]}; i++)); do
+      [ "${recent_deltas[$i]}" -gt "$threshold" ] 2>/dev/null && volatile_count=$((volatile_count + 1))
+    done
     [ "$volatile_count" -ge 3 ] && is_volatile=1
   fi
 
@@ -848,7 +848,8 @@ remembrall_config() {
 
   local value
   # Use raw jq to get the value; .[$k] // empty returns nothing for missing keys
-  value=$(jq -r --arg k "$key" 'if has($k) then .[$k] | tostring else empty end' "$config_file" 2>/dev/null)
+  # Use tostring for scalars, raw output for arrays/objects
+  value=$(jq -r --arg k "$key" 'if has($k) then (if (.[$k] | type) == "array" or (.[$k] | type) == "object" then .[$k] | tojson else .[$k] | tostring end) else empty end' "$config_file" 2>/dev/null)
 
   if [ -z "$value" ]; then
     echo "$default"
@@ -875,9 +876,15 @@ remembrall_config_validate() {
         return 1
       fi
       ;;
-    autonomous_mode|git_integration|team_handoffs)
+    autonomous_mode|git_integration|team_handoffs|easter_eggs)
       if [ "$value" != "true" ] && [ "$value" != "false" ]; then
         echo "remembrall: invalid $key '$value' — must be true or false" >&2
+        return 1
+      fi
+      ;;
+    disabled_hooks)
+      if ! echo "$value" | jq -e 'type == "array"' >/dev/null 2>&1; then
+        echo "remembrall: invalid disabled_hooks '$value' — must be a JSON array" >&2
         return 1
       fi
       ;;
@@ -919,6 +926,20 @@ remembrall_config_set() {
     rm -f "$tmp"
     return 1
   fi
+}
+
+# ─── Hook Enable/Disable ─────────────────────────────────────
+
+# Check if a hook is enabled (not in the disabled_hooks list).
+# Returns 0 (enabled) or 1 (disabled).
+remembrall_hook_enabled() {
+  local hook_name="$1"
+  local disabled
+  disabled=$(remembrall_config "disabled_hooks" "[]")
+  if echo "$disabled" | jq -e "index(\"$hook_name\")" >/dev/null 2>&1; then
+    return 1
+  fi
+  return 0
 }
 
 # ─── Git Integration ──────────────────────────────────────────────

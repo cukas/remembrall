@@ -30,43 +30,6 @@ The gauge auto-configures on first session. Run `/setup-remembrall` to customize
 
 ---
 
-<details>
-<summary><strong>Full documentation</strong></summary>
-
-Remembrall monitors your context window in real-time, warns you at critical thresholds, creates structured handoff documents with git patches, and offers smart replay with state verification. Team handoffs let another developer's Claude session pick up where yours left off.
-
-## What's New in v2
-
-- **Zero-Setup Experience** — Remembrall works out of the box with no manual configuration. The status-line bridge is auto-configured on first session start, and the estimator auto-calibrates from bridge data once context usage reaches 20% — no compaction events needed. Every user gets accurate context tracking regardless of their plugin/skill setup.
-
-- **No External Dependencies** — Removed the `bc` requirement. All comparisons use integer arithmetic. Only `jq` is required (and hooks exit gracefully without it).
-
-- **Single-Script Handoff** — The `/handoff` skill now pipes content to a single `handoff-create.sh` script that handles path computation, git patches, YAML frontmatter, and team copies. More reliable than multi-step orchestration.
-
-- **Early Handoff Nudge** — At 60% context remaining, Remembrall nudges Claude to run `/handoff` and save progress. This ensures a handoff document exists before context gets critical, so nothing is lost if compaction happens suddenly.
-
-- **Git Patch Snapshots** — Before handoff, Remembrall captures uncommitted changes for session-touched files only. Patches are stored in `~/.remembrall/patches/` — your repo stays clean (no WIP commits, no stashes).
-
-- **Team Handoffs** — Share handoffs with your team via a project-local `.remembrall/handoffs/` directory. Another team member's Claude session can pick up where yours left off.
-
-- **Smart Replay** — `/replay` replaces `/resume`. It verifies git state, checks that expected files still exist, warns if HEAD has moved, and offers to restore git patches from the previous session. Remaining tasks are priority-ordered: blockers first, then in-progress, then not-started.
-
-- **Handoff Chains** — Each handoff links to its predecessor via `previous_session`. Across multiple sessions, you get a linked history: session 1 → session 2 → session 3. The replay briefing shows where you are in the chain.
-
-- **Global Config** — One-time setup at `~/.remembrall/config.json` persists settings across all sessions. Configure git integration and team handoffs once, and every Claude session respects them.
-
-- **Plan Mode Integration** — At 30% remaining, Remembrall tells Claude to run `/handoff` and enter plan mode. The user sees Claude Code's native "Yes, clear context" option — one click for a fresh start with the handoff preserved. No more manual `/handoff` → `/clear` → `/replay`.
-
-- **Methodology Preservation** — The continuation plan includes a prescriptive "Resume With" section that tells the next session exactly which methodology to invoke — `/ralph-loop` iteration N, `/test-driven-development` with the next test to write, parallel agent dispatch for tasks A/B/C, `/systematic-debugging` with current hypothesis, etc. The next session doesn't just know *what* to do, but *how* to continue doing it the same way. Active MCP servers, skills, and agent-specific state are also captured.
-
-- **Visual Context Gauge** — Progress bar in the status line and nudge messages so you can see context health at a glance. The status line uses color-coded ANSI (green/orange/red), while nudge messages use a plain-text gauge for JSON compatibility:
-  ```
-  🔮 [████████░░] 80%            — calm
-  🔮 [█████░░░░░] 50% ✦          — sparkle, checkpoint
-  🔮 [███░░░░░░░] 28% ⚡          — lightning, /handoff triggered
-  💀 [██░░░░░░░░] 15% Obliviate!  — memory wipe incoming (pulsing 🔮↔💀)
-  ```
-
 ## How It Works
 
 > **Zero-setup by default.** Remembrall auto-configures the status-line bridge on first session start and derives per-user context limits from bridge data. No compaction events needed — the estimator calibrates once the session has used 20% of context.
@@ -148,6 +111,11 @@ Remembrall monitors your context window in real-time, warns you at critical thre
 
 5. **Stop Check** (`stop-check.sh`) — When Claude finishes a task, checks if context is below 40%. If a handoff already exists, suggests `/clear` + `/replay` before starting new work. If no handoff exists, tells Claude to run `/handoff` first.
 
+---
+
+<details>
+<summary><strong>Full documentation</strong></summary>
+
 ## Installation
 
 ### Install
@@ -174,7 +142,8 @@ Remembrall uses `~/.remembrall/config.json` for persistent settings. Run `/setup
   "git_integration": false,
   "team_handoffs": false,
   "autonomous_mode": false,
-  "retention_hours": 72
+  "retention_hours": 72,
+  "easter_eggs": true
 }
 ```
 
@@ -185,6 +154,8 @@ Remembrall uses `~/.remembrall/config.json` for persistent settings. Run `/setup
 | `autonomous_mode` | `false` | Skip plan mode (no human click needed) — use `/handoff` + auto-compaction instead. Enable for overnight/unattended runs. |
 | `retention_hours` | `72` | Hours to keep handoff files before auto-cleanup |
 | `max_transcript_kb` | *(auto)* | Override max transcript size in KB. Rarely needed — bridge-derived calibration handles this automatically. |
+| `easter_eggs` | `true` | Show Harry Potter spell mappings in context nudges |
+| `disabled_hooks` | `[]` | Array of hook names to disable (e.g., `["stop-check"]`) |
 
 Settings apply globally — once configured, all Claude sessions respect them. Values are stored as native JSON types (booleans, numbers).
 
@@ -276,7 +247,7 @@ Handoff files and patches are stored per-project:
 
 - Each session gets its own file — multiple Claude instances can coexist
 - Handoffs older than the configured retention period (default: 72 hours) are auto-cleaned
-- Consumed handoffs are deleted immediately (single-use baton)
+- Consumed handoffs are renamed to `.consumed.md` and auto-cleaned after 1 hour
 
 ## Example Use Cases
 
@@ -318,9 +289,33 @@ You're walking Claude through a complex codebase architecture so it can help new
 | Nudge dir | `/tmp/claude-context-nudges/` | `/tmp/remembrall-nudges/` |
 | SessionStart | Bare `additionalContext` | `hookSpecificOutput` format |
 
+## Troubleshooting
+
+**`jq` not installed** — Hooks exit silently without `jq`. Run `jq --version` to check. Install via `brew install jq` (macOS) or `sudo apt-get install jq` (Linux).
+
+**`md5`/`md5sum` not found** — Handoff directory computation fails silently. Install `coreutils` (`brew install coreutils` on macOS, pre-installed on Linux).
+
+**Bridge not injecting** — Check if the bridge snippet is present: `grep -q "claude-context-pct" ~/.claude/settings.json && echo OK || echo MISSING`. If missing, restart your session or run `/setup-remembrall`.
+
+**Handoff not consumed on resume** — Run `/remembrall-status` and look for `.claimed-*` or `.consumed` files. Claimed files older than 5 minutes are cleaned up automatically.
+
+**Stale calibration after model switch** — Delete `~/.remembrall/calibration.json` and let Remembrall recalibrate from the new model's bridge data.
+
+**Hooks don't seem to be running** — Ensure scripts are executable: `chmod +x hooks/*.sh scripts/*.sh`. Verify `jq --version` returns a version. Check that the plugin is installed: `claude plugin list`.
+
+**Bridge file is empty/missing** — The bridge file is written on each Claude response cycle. After `/clear` or compaction, it's intentionally deleted and recreated on the next response. If persistently missing, restart your session.
+
 ## FAQ
 
 **Does Remembrall bloat my context?** No. It injects one handoff document on session resume (then deletes it). During a session, nudges are short one-line messages injected via `additionalContext` — each fires at most once per threshold (60%, 30%, 20%), so the total overhead is minimal. There is no accumulated memory that grows over time.
+
+**Hooks don't seem to be running** — Check `jq --version` and `chmod +x hooks/*.sh`. See Troubleshooting section above.
+
+**Bridge file is empty/missing** — Restart the session. The bridge is written on each response cycle. Check `grep -q "claude-context-pct" ~/.claude/settings.json`.
+
+**Handoff not loading after /clear** — Run `/remembrall-status` to check handoff state. Verify the session ID matches between the handoff file and current session.
+
+**Calibration seems wrong** — Delete `~/.remembrall/calibration.json` and let it recalibrate from fresh bridge data.
 
 **Are there any easter eggs?** Maybe. Try speaking to Claude in the language of wizards when the Remembrall starts glowing. 🔮
 

@@ -43,9 +43,9 @@ The handoff file is a **single-use baton**. Read it, verify state, restore patch
    - `status`, `branch`, `commit`, `patch`, `files`, `tasks`, `team`, `previous_session`
    - If no frontmatter (legacy handoff), skip verification steps and proceed with markdown-only mode.
 
-4. **Delete consumed file** — Single-use baton:
+4. **Mark consumed file** — Rename instead of delete (preserved for safety; auto-cleaned after 1 hour):
    ```bash
-   rm -f "$HANDOFF_FILE"
+   mv "$HANDOFF_FILE" "${HANDOFF_FILE%.md}.consumed.md"
    ```
 
 5. **Check chain history** — If `previous_session` is present, note it for the briefing. Optionally check if the previous session's handoff still exists (it usually won't — consumed on resume). This gives the user awareness of how many sessions deep they are.

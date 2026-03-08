@@ -4,6 +4,28 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2.4.0] - 2026-03-08
+
+### Fixed
+- Staged changes now captured in auto-generated handoffs (precompact-handoff.sh)
+- Misleading `local_` variable names at top-level script scope renamed to `_` prefix
+- Version mismatch between plugin.json and marketplace.json
+
+### Changed
+- Consumed handoffs renamed to `.consumed.md` instead of deleted (preserved for 1 hour)
+- HP spell strings now configurable via `easter_eggs` config option (default: `true`)
+- settings.json backup created before bridge injection
+- Growth tracking uses proper array instead of string splitting
+- marketplace.json description tightened
+
+### Added
+- `easter_eggs` config option to toggle spell strings in context nudges
+- `disabled_hooks` config option to disable individual hooks
+- `remembrall_hook_enabled()` helper function
+- Troubleshooting section in README
+- Expanded FAQ with common issues
+- Architecture diagram and "Five Layers" moved to top-level visibility in README
+
 ## [2.3.1] - 2026-03-08
 
 ### Fixed
