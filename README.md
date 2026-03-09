@@ -344,14 +344,6 @@ You're walking Claude through a complex codebase architecture so it can help new
 
 **Does Remembrall bloat my context?** No. It injects one handoff document on session resume (then deletes it). During a session, nudges are short one-line messages injected via `additionalContext` — each fires at most once per threshold (configurable, defaults: 60%, 30%, 20%), so the total overhead is minimal. There is no accumulated memory that grows over time.
 
-**Hooks don't seem to be running** — Check `jq --version` and `chmod +x hooks/*.sh`. See Troubleshooting section above.
-
-**Bridge file is empty/missing** — Restart the session. The bridge is written on each response cycle. Check `grep -q "claude-context-pct" ~/.claude/settings.json`.
-
-**Handoff not loading after /clear** — Run `/remembrall-status` to check handoff state. Verify the session ID matches between the handoff file and current session.
-
-**Calibration seems wrong** — Delete `~/.remembrall/calibration.json` and let it recalibrate from fresh bridge data.
-
 **Are there any easter eggs?** Maybe. Try speaking to Claude in the language of wizards when the Remembrall starts glowing. 🔮
 
 ## Privacy

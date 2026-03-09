@@ -78,14 +78,14 @@ After the bridge and gauge are set up, present these optional features to the us
 
    If yes, run:
    ```bash
-   source "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/plugins/remembrall}/hooks/lib.sh"
+   source "${CLAUDE_PLUGIN_ROOT:-$(cat /tmp/remembrall-meta/plugin-root 2>/dev/null)}/hooks/lib.sh"
    remembrall_config_set "git_integration" "true"
    echo "Git integration enabled"
    ```
 
    If no, run:
    ```bash
-   source "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/plugins/remembrall}/hooks/lib.sh"
+   source "${CLAUDE_PLUGIN_ROOT:-$(cat /tmp/remembrall-meta/plugin-root 2>/dev/null)}/hooks/lib.sh"
    remembrall_config_set "git_integration" "false"
    echo "Git integration disabled"
    ```
@@ -94,7 +94,7 @@ After the bridge and gauge are set up, present these optional features to the us
 
    If yes, run:
    ```bash
-   source "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/plugins/remembrall}/hooks/lib.sh"
+   source "${CLAUDE_PLUGIN_ROOT:-$(cat /tmp/remembrall-meta/plugin-root 2>/dev/null)}/hooks/lib.sh"
    remembrall_config_set "team_handoffs" "true"
    echo "Team handoffs enabled"
    ```
@@ -102,7 +102,7 @@ After the bridge and gauge are set up, present these optional features to the us
 
    If no, run:
    ```bash
-   source "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/plugins/remembrall}/hooks/lib.sh"
+   source "${CLAUDE_PLUGIN_ROOT:-$(cat /tmp/remembrall-meta/plugin-root 2>/dev/null)}/hooks/lib.sh"
    remembrall_config_set "team_handoffs" "false"
    echo "Team handoffs disabled"
    ```

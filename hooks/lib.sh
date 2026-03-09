@@ -1066,6 +1066,32 @@ remembrall_team_handoff_dir() {
 # Publish session_id so skill bash commands can read it.
 # Hooks have session_id from JSON input; Bash tool commands don't.
 # Written on every prompt by context-monitor.sh — always current.
+# ─── Plugin Root Discovery ────────────────────────────────────────
+# Hooks get CLAUDE_PLUGIN_ROOT from Claude Code automatically.
+# Skills/commands run in a bare shell where it's NOT set.
+# Persist the root on every hook run so skills can find it.
+
+remembrall_publish_plugin_root() {
+  [ -z "${CLAUDE_PLUGIN_ROOT:-}" ] && return
+  local dir="/tmp/remembrall-meta"
+  mkdir -p "$dir" 2>/dev/null
+  printf '%s' "$CLAUDE_PLUGIN_ROOT" > "$dir/plugin-root" 2>/dev/null
+}
+
+# Read the persisted plugin root. Falls back to CLAUDE_PLUGIN_ROOT env var.
+remembrall_plugin_root() {
+  if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
+    printf '%s' "$CLAUDE_PLUGIN_ROOT"
+    return
+  fi
+  local f="/tmp/remembrall-meta/plugin-root"
+  if [ -f "$f" ]; then
+    cat "$f" 2>/dev/null
+    return
+  fi
+  return 1
+}
+
 remembrall_publish_session_id() {
   local cwd="$1"
   local session_id="$2"

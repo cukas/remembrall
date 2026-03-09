@@ -7,13 +7,13 @@ Clean up all remembrall data and remove the bridge from settings.json.
 1. **Preview what will be removed** — Run a dry run first:
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/plugins/remembrall@cukas}/scripts/remembrall-uninstall.sh" --dry-run
+bash "${CLAUDE_PLUGIN_ROOT:-$(cat /tmp/remembrall-meta/plugin-root 2>/dev/null)}/scripts/remembrall-uninstall.sh" --dry-run
 ```
 
 2. **Run the uninstall** — If the preview looks correct, run without --dry-run:
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/plugins/remembrall@cukas}/scripts/remembrall-uninstall.sh"
+bash "${CLAUDE_PLUGIN_ROOT:-$(cat /tmp/remembrall-meta/plugin-root 2>/dev/null)}/scripts/remembrall-uninstall.sh"
 ```
 
 3. **Uninstall the plugin itself:**

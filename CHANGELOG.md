@@ -13,7 +13,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `format_version: 2` in handoff frontmatter for forward compatibility
 - Configurable `recency_window` (default: 60s) for handoff-to-session matching
 - Config validation for `recency_window`, `debug`, and threshold settings
-- 265 new test lines covering all v2.5.0 features (198 total tests)
+- 265 new test lines covering all v2.5.0 features (202 total tests)
+- `remembrall_publish_plugin_root()` / `remembrall_plugin_root()` — persists plugin root to `/tmp/remembrall-meta/` so skills and commands work without `CLAUDE_PLUGIN_ROOT` env var
 
 ### Changed
 - Preemptive handoff creation now runs in background to avoid eating into context-monitor's 15s timeout
@@ -21,6 +22,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Architecture diagram updated to show configurable thresholds
 
 ### Fixed
+- Skills/commands now find plugin scripts reliably regardless of versioned cache path — hooks persist `CLAUDE_PLUGIN_ROOT` to `/tmp/remembrall-meta/plugin-root`
 - `remembrall_hook_enabled()` jq injection: hook name now passed via `--arg` instead of raw string interpolation
 - `remembrall_frontmatter_get()` YAML fallback safe under `set -euo pipefail` (added `|| true`)
 - Empty `FILE_PATHS` guard in precompact-handoff to avoid pipefail double-output

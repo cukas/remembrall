@@ -8,7 +8,7 @@ description: Toggle autonomous mode on/off — skip plan mode for unattended ove
 Check current state and toggle:
 
 ```bash
-source "${CLAUDE_PLUGIN_ROOT}/hooks/lib.sh"
+source "${CLAUDE_PLUGIN_ROOT:-$(cat /tmp/remembrall-meta/plugin-root 2>/dev/null)}/hooks/lib.sh"
 CURRENT=$(remembrall_config "autonomous_mode" "false")
 echo "Current: autonomous_mode=$CURRENT"
 ```
@@ -17,7 +17,7 @@ echo "Current: autonomous_mode=$CURRENT"
 - If currently **on** (`true`): set it to `false` and confirm.
 
 ```bash
-source "${CLAUDE_PLUGIN_ROOT}/hooks/lib.sh"
+source "${CLAUDE_PLUGIN_ROOT:-$(cat /tmp/remembrall-meta/plugin-root 2>/dev/null)}/hooks/lib.sh"
 CURRENT=$(remembrall_config "autonomous_mode" "false")
 if [ "$CURRENT" = "true" ]; then
   remembrall_config_set "autonomous_mode" "false"

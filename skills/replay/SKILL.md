@@ -15,7 +15,8 @@ The handoff file is a **single-use baton**. Read it, verify state, restore patch
 
 1. **Find handoff files** — Search both personal and team directories. Check for own session's handoff first:
    ```bash
-   source "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/plugins/remembrall}/hooks/lib.sh"
+   REMEMBRALL_ROOT="${CLAUDE_PLUGIN_ROOT:-$(cat /tmp/remembrall-meta/plugin-root 2>/dev/null)}"
+   source "${REMEMBRALL_ROOT}/hooks/lib.sh"
    CWD=$(pwd)
    HANDOFF_DIR=$(remembrall_handoff_dir "$CWD")
    TEAM_DIR=$(remembrall_team_handoff_dir "$CWD")

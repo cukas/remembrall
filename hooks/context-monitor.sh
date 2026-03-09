@@ -22,6 +22,9 @@ fi
 # Publish session_id so skill commands (handoff-create.sh) can read it
 remembrall_publish_session_id "$CWD" "$SESSION_ID"
 
+# Persist plugin root so skills/commands can find scripts without CLAUDE_PLUGIN_ROOT
+remembrall_publish_plugin_root
+
 # Find bridge file (checks CWD + parent dirs), fall back to transcript size
 ESTIMATED=""
 REMAINING=""

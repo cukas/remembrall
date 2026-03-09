@@ -1644,6 +1644,35 @@ rm -f "$HOME/.claude/settings.json" "$HOME/.claude/settings.json.remembrall-back
 
 # ═══════════════════════════════════════════════════════════════════
 echo ""
+echo "Plugin root discovery:"
+
+# remembrall_publish_plugin_root writes to /tmp/remembrall-meta/plugin-root
+rm -rf /tmp/remembrall-meta 2>/dev/null
+export CLAUDE_PLUGIN_ROOT="/fake/plugin/path"
+source "$PLUGIN_ROOT/hooks/lib.sh"
+remembrall_publish_plugin_root
+PUBLISHED=$(cat /tmp/remembrall-meta/plugin-root 2>/dev/null)
+assert_eq "publish_plugin_root writes file" "/fake/plugin/path" "$PUBLISHED"
+
+# remembrall_plugin_root returns env var when set
+GOT=$(remembrall_plugin_root)
+assert_eq "plugin_root prefers env var" "/fake/plugin/path" "$GOT"
+
+# remembrall_plugin_root falls back to file when env unset
+unset CLAUDE_PLUGIN_ROOT
+GOT=$(remembrall_plugin_root)
+assert_eq "plugin_root falls back to file" "/fake/plugin/path" "$GOT"
+
+# remembrall_plugin_root fails when nothing available
+rm -rf /tmp/remembrall-meta 2>/dev/null
+GOT=$(remembrall_plugin_root 2>/dev/null) || GOT="FAIL"
+assert_eq "plugin_root fails gracefully" "FAIL" "$GOT"
+
+# Clean up
+rm -rf /tmp/remembrall-meta 2>/dev/null
+
+# ═══════════════════════════════════════════════════════════════════
+echo ""
 echo "─────────────────"
 printf "Results: ${GREEN}%d passed${RESET}, ${RED}%d failed${RESET}\n" "$PASS" "$FAIL"
 

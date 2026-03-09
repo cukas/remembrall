@@ -23,7 +23,8 @@ Create a structured handoff document that any Claude instance can read to resume
 2. **Write the handoff** — Pipe a markdown document to `handoff-create.sh`. The script handles all path computation, git patches, YAML frontmatter, and team copies automatically. Always pass `--session-id` with `$CLAUDE_SESSION_ID` so the handoff can be found by auto-resume after `/clear`.
 
    ```bash
-   cat << 'HANDOFF_CONTENT' | bash "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/plugins/remembrall}/scripts/handoff-create.sh" \
+   REMEMBRALL_ROOT="${CLAUDE_PLUGIN_ROOT:-$(cat /tmp/remembrall-meta/plugin-root 2>/dev/null)}"
+   cat << 'HANDOFF_CONTENT' | bash "${REMEMBRALL_ROOT}/scripts/handoff-create.sh" \
      --cwd "$(pwd)" \
      --session-id "$CLAUDE_SESSION_ID" \
      --status "in_progress" \
