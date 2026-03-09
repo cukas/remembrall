@@ -88,6 +88,7 @@ The handoff file is a **single-use baton**. Read it, verify state, restore patch
     ## Session Replay
 
     **Task:** [from handoff]
+    **Active Skill:** [skill and phase/step from handoff, or "none"]
     **Status:** [status] | branch: [match/mismatch] | commit: [match/N new commits]
     **Files:** [N unchanged, N modified, N missing since handoff]
     **Patches:** [applied / skipped / none]
@@ -118,7 +119,9 @@ The handoff file is a **single-use baton**. Read it, verify state, restore patch
     - Words like "started", "partial", "WIP", "halfway", "begun" → in-progress
     - Everything else → not-started
 
-12. **Ask to proceed** — "Ready to continue with [next remaining item]?" Don't charge ahead — the user may have changed priorities.
+12. **Resume active skill** — If the handoff specifies an **Active Skill** (e.g., `/plan-guarded Phase 2 step 3`), invoke that skill before proceeding. The skill will pick up from the documented phase/step. If no active skill, proceed normally.
+
+13. **Ask to proceed** — "Ready to continue with [next remaining item]?" Don't charge ahead — the user may have changed priorities.
 
 ## Rules
 - Delete only the consumed handoff file — leave other sessions' files alone

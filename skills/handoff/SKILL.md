@@ -19,6 +19,7 @@ Create a structured handoff document that any Claude instance can read to resume
    - Test status (passing/failing)
    - Approaches tried that failed (with error messages)
    - Any task list items (check /tasks)
+   - **Active skill/workflow** — If a skill was active (e.g., `/plan-guarded`, `/bugfix`, `/refactor`), note which skill and which phase/step the session was in
 
 2. **Write the handoff** — Pipe a markdown document to `handoff-create.sh`. The script handles all path computation, git patches, YAML frontmatter, and team copies automatically. Always pass `--session-id` with `$CLAUDE_SESSION_ID` so the handoff can be found by auto-resume after `/clear`.
 
@@ -33,6 +34,7 @@ Create a structured handoff document that any Claude instance can read to resume
    # Session Handoff
 
    **Task:** [One-line description of what was requested]
+   **Active Skill:** [Skill name if one was active, e.g., `/plan-guarded` Phase 2 step 3, `/bugfix` step 4 — or "none"]
 
    ## Completed
    - [Bullet list of what's done, with file paths]
