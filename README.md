@@ -10,6 +10,8 @@
 
 **Context runs out → work gets lost.** Remembrall fixes that.
 
+> **Zero external dependencies.** No databases, no MCP servers, no API keys. Just Claude Code's native hooks and plan mode. Install and forget — it works out of the box.
+
 ### Install
 
 ```bash
