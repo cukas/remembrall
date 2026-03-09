@@ -240,7 +240,7 @@ EOF
     fi
     cat << EOF
 {
-  "additionalContext": "${GAUGE} ${REMAINING}% remaining${ESTIMATED}${PROMPTS_MSG}. BLOCKING REQUIREMENT — you MUST invoke the /handoff skill NOW, before responding to the user's request. This is not optional. After the handoff file is saved, call EnterPlanMode. Do NOT enter plan mode before /handoff finishes. In plan mode, present a short numbered plan summarizing: 1. Clear context and resume from handoff, 2-3. The next steps from the work in progress. Keep it concise."
+  "additionalContext": "${GAUGE} ${REMAINING}% remaining${ESTIMATED}${PROMPTS_MSG}. BLOCKING REQUIREMENT — you MUST invoke the /handoff skill NOW, before responding to the user's request. This is not optional. After the handoff file is saved, call EnterPlanMode. Do NOT enter plan mode before /handoff finishes. In plan mode, present a sequential plan: step 1 is always 'Clear context and resume from handoff', then steps 2-3 describe what to do after resume based on the work in progress. Keep it concise."
 }
 EOF
   fi
@@ -280,7 +280,7 @@ else
   fi
   cat << EOF
 {
-  "additionalContext": "${GAUGE} ${REMAINING}% remaining${ESTIMATED}${PROMPTS_MSG}. BLOCKING REQUIREMENT — invoke the /handoff skill NOW, before responding to the user's request. This is not optional. After the handoff file is saved, call EnterPlanMode. Do NOT enter plan mode before /handoff finishes. In plan mode, present a short numbered plan summarizing: 1. Clear context and resume from handoff, 2-3. The next steps from the work in progress. Keep it concise.${SPELL_LINE}"
+  "additionalContext": "${GAUGE} ${REMAINING}% remaining${ESTIMATED}${PROMPTS_MSG}. BLOCKING REQUIREMENT — invoke the /handoff skill NOW, before responding to the user's request. This is not optional. After the handoff file is saved, call EnterPlanMode. Do NOT enter plan mode before /handoff finishes. In plan mode, present a sequential plan: step 1 is always 'Clear context and resume from handoff', then steps 2-3 describe what to do after resume based on the work in progress. Keep it concise.${SPELL_LINE}"
 }
 EOF
 fi
