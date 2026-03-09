@@ -1,7 +1,7 @@
 {
   "name": "remembrall",
   "description": "Context-aware session continuity for Claude Code — plan mode at low context, autonomous overnight runs, session journals, git patch snapshots, team handoffs, smart replay, and auto-resume",
-  "version": "2.5.0",
+  "version": "2.6.1",
   "author": {
     "name": "cukas"
   },

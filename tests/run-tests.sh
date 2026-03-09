@@ -439,19 +439,31 @@ assert_eq "50% second time: suppressed" "" "$OUTPUT"
 # 25% — warning with plan mode
 echo "25" > "$CTX_DIR/test-sess"
 OUTPUT=$(echo '{"session_id":"test-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
-assert_match "25% triggers warning" "remaining.*EnterPlanMode" "$OUTPUT"
+assert_match "25% triggers warning" "remaining.*BLOCKING REQUIREMENT" "$OUTPUT"
 assert_match "25% warning suggests EnterPlanMode" "EnterPlanMode" "$OUTPUT"
+
+# 25% again — persistent (no handoff yet)
+OUTPUT=$(echo '{"session_id":"test-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
+assert_match "25% second time: persistent (no handoff yet)" "BLOCKING REQUIREMENT" "$OUTPUT"
 
 # 15% — urgent with plan mode
 echo "15" > "$CTX_DIR/test-sess"
 OUTPUT=$(echo '{"session_id":"test-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
-assert_match "15% triggers urgent" "remaining.*CRITICAL" "$OUTPUT"
+assert_match "15% triggers urgent" "remaining.*BLOCKING REQUIREMENT" "$OUTPUT"
 assert_match "15% urgent requires EnterPlanMode" "EnterPlanMode" "$OUTPUT"
-assert_match "15% urgent says first handoff" "First invoke" "$OUTPUT"
+assert_match "15% urgent says MUST invoke" "MUST invoke the /handoff skill NOW" "$OUTPUT"
 
-# 15% again — suppressed
+# 15% again — persistent (repeats until handoff exists)
 OUTPUT=$(echo '{"session_id":"test-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
-assert_eq "15% second time: suppressed" "" "$OUTPUT"
+assert_match "15% second time: persistent (no handoff yet)" "BLOCKING REQUIREMENT" "$OUTPUT"
+
+# Create handoff file — nudge should now be suppressed
+HASH=$(source "$PLUGIN_ROOT/hooks/lib.sh" && remembrall_md5 "$TEST_CWD")
+mkdir -p "$HOME/.remembrall/handoffs/$HASH"
+echo "# handoff" > "$HOME/.remembrall/handoffs/$HASH/handoff-test-sess.md"
+OUTPUT=$(echo '{"session_id":"test-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
+assert_eq "15% after handoff saved: suppressed" "" "$OUTPUT"
+rm -f "$HOME/.remembrall/handoffs/$HASH/handoff-test-sess.md"
 
 # 90% — reset (post-compaction)
 echo "90" > "$CTX_DIR/test-sess"

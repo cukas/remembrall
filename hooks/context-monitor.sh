@@ -211,9 +211,19 @@ fi
 AUTONOMOUS_SKILL=$(remembrall_escape_json "$AUTONOMOUS_SKILL")
 
 # At or below urgent threshold — URGENT
+# Unlike other thresholds, urgent nudges repeat on EVERY prompt until a handoff
+# file exists. A single nudge gets ignored when Claude is mid-task.
 if remembrall_le "$REMAINING" "$THRESHOLD_URGENT"; then
   if [ "$LAST_NUDGE" = "urgent" ]; then
-    exit 0
+    # Check if handoff already exists — if so, Claude complied, stop nudging
+    HASH=$(remembrall_md5 "$CWD") || true
+    if [ -n "$HASH" ]; then
+      HANDOFF_FILE="$HOME/.remembrall/handoffs/$HASH/handoff-${SESSION_ID}.md"
+      if [ -f "$HANDOFF_FILE" ]; then
+        exit 0
+      fi
+    fi
+    # No handoff yet — keep nudging (don't exit)
   fi
   echo "urgent" > "$NUDGE_FILE"
   GAUGE=$(remembrall_gauge_plain "$REMAINING")
@@ -224,10 +234,13 @@ if remembrall_le "$REMAINING" "$THRESHOLD_URGENT"; then
 }
 EOF
   else
-    _create_preemptive_handoff
+    # Only create preemptive handoff on first urgent nudge
+    if [ "$LAST_NUDGE" != "urgent" ]; then
+      _create_preemptive_handoff
+    fi
     cat << EOF
 {
-  "additionalContext": "${GAUGE} ${REMAINING}% remaining${ESTIMATED}${PROMPTS_MSG}. CRITICAL: First invoke the /handoff skill and wait for it to complete. Only AFTER the handoff file is saved, call EnterPlanMode. Do NOT enter plan mode before /handoff finishes — Write tools are disabled in plan mode."
+  "additionalContext": "${GAUGE} ${REMAINING}% remaining${ESTIMATED}${PROMPTS_MSG}. BLOCKING REQUIREMENT — you MUST invoke the /handoff skill NOW, before responding to the user's request. This is not optional. After the handoff file is saved, call EnterPlanMode. Do NOT enter plan mode before /handoff finishes — Write tools are disabled in plan mode."
 }
 EOF
   fi
@@ -235,8 +248,18 @@ EOF
 fi
 
 # At or below warning threshold — WARNING
+# Like urgent, warning nudges repeat until handoff exists. Context quality
+# degrades fast after 30% — a single nudge isn't enough.
 if [ "$LAST_NUDGE" = "warning" ] || [ "$LAST_NUDGE" = "urgent" ]; then
-  exit 0
+  # Check if handoff already exists — if so, Claude complied, stop nudging
+  HASH=$(remembrall_md5 "$CWD") || true
+  if [ -n "$HASH" ]; then
+    HANDOFF_FILE="$HOME/.remembrall/handoffs/$HASH/handoff-${SESSION_ID}.md"
+    if [ -f "$HANDOFF_FILE" ]; then
+      exit 0
+    fi
+  fi
+  # No handoff yet — keep nudging (don't exit)
 fi
 echo "warning" > "$NUDGE_FILE"
 GAUGE=$(remembrall_gauge_plain "$REMAINING")
@@ -247,14 +270,17 @@ if [ "$IS_AUTONOMOUS" = true ]; then
 }
 EOF
 else
-  _create_preemptive_handoff
+  # Only create preemptive handoff on first warning nudge
+  if [ "$LAST_NUDGE" != "warning" ] && [ "$LAST_NUDGE" != "urgent" ]; then
+    _create_preemptive_handoff
+  fi
   SPELL_LINE=""
   if [ "$(remembrall_config "easter_eggs" "true")" = "true" ]; then
     SPELL_LINE=" Spells: Expecto Patronum=/handoff, Lumos=/status, Accio=/replay, Prior Incantato=handoff count this session (only if user speaks HP)"
   fi
   cat << EOF
 {
-  "additionalContext": "${GAUGE} ${REMAINING}% remaining${ESTIMATED}${PROMPTS_MSG}. First invoke the /handoff skill and wait for it to complete. Only AFTER the handoff file is saved, call EnterPlanMode. Do NOT enter plan mode before /handoff finishes.${SPELL_LINE}"
+  "additionalContext": "${GAUGE} ${REMAINING}% remaining${ESTIMATED}${PROMPTS_MSG}. BLOCKING REQUIREMENT — invoke the /handoff skill NOW, before responding to the user's request. This is not optional. After the handoff file is saved, call EnterPlanMode. Do NOT enter plan mode before /handoff finishes.${SPELL_LINE}"
 }
 EOF
 fi

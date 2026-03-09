@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2.6.1] - 2026-03-09
+
+### Fixed
+- **Persistent nudges at warning + urgent thresholds** — nudges now repeat on every prompt until a handoff file exists, instead of firing once and going silent. This was the root cause of Claude ignoring context warnings and draining to 1%
+- Nudge text upgraded from "CRITICAL" to "BLOCKING REQUIREMENT — you MUST invoke the /handoff skill NOW, before responding to the user's request" for stronger Claude compliance
+- Preemptive handoff creation now only runs on the first nudge per threshold (prevents background process spam on repeat nudges)
+
+### Changed
+- Journal threshold (60%) remains fire-once (gentle reminder)
+- Warning (30%) and urgent (20%) thresholds now persistent until handoff exists on disk
+
 ## [2.5.0] - 2026-03-08
 
 ### Added
