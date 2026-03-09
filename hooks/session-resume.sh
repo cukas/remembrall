@@ -136,7 +136,8 @@ fi
 
 # Recency fallback: if own-session handoff not found, check for one created
 # within the recency window. Handles /handoff with timestamp ID (CLAUDE_SESSION_ID unavailable).
-# Verify frontmatter session_id matches to prevent claiming another session's handoff.
+# After /clear, session_id changes — skip session_id match check since CWD hash
+# already scopes it and the recency window prevents picking up stale handoffs.
 RECENCY_WINDOW=$(remembrall_config "recency_window" "60" 2>/dev/null)
 [[ "$RECENCY_WINDOW" =~ ^[0-9]+$ ]] || RECENCY_WINDOW=60
 if [ -z "$HANDOFF_FILE" ]; then
@@ -144,8 +145,9 @@ if [ -z "$HANDOFF_FILE" ]; then
     [ -f "$f" ] || continue
     _age=$(remembrall_file_age "$f")
     if [ "$_age" -lt "$RECENCY_WINDOW" ]; then
-      # If we have a session ID, verify the handoff's frontmatter matches
-      if [ -n "$SESSION_ID" ]; then
+      # After /clear, session_id changes — accept any recent handoff from same CWD.
+      # For compact, session_id stays the same so this path isn't reached.
+      if [ "$SOURCE" != "clear" ] && [ -n "$SESSION_ID" ]; then
         fm_sid=$(remembrall_frontmatter_get "$f" "session_id" 2>/dev/null)
         if [ -n "$fm_sid" ] && [ "$fm_sid" != "$SESSION_ID" ]; then
           continue  # belongs to another session
