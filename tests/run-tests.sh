@@ -445,9 +445,9 @@ assert_match "25% warning suggests EnterPlanMode" "EnterPlanMode" "$OUTPUT"
 # 15% — urgent with plan mode
 echo "15" > "$CTX_DIR/test-sess"
 OUTPUT=$(echo '{"session_id":"test-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
-assert_match "15% triggers urgent" "remaining.*IMMEDIATELY" "$OUTPUT"
+assert_match "15% triggers urgent" "remaining.*CRITICAL" "$OUTPUT"
 assert_match "15% urgent requires EnterPlanMode" "EnterPlanMode" "$OUTPUT"
-assert_match "15% urgent says IMMEDIATELY" "IMMEDIATELY" "$OUTPUT"
+assert_match "15% urgent says first handoff" "First invoke" "$OUTPUT"
 
 # 15% again — suppressed
 OUTPUT=$(echo '{"session_id":"test-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)

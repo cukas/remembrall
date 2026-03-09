@@ -224,7 +224,7 @@ EOF
     _create_preemptive_handoff
     cat << EOF
 {
-  "additionalContext": "${GAUGE} ${REMAINING}% remaining${ESTIMATED}${PROMPTS_MSG}. IMMEDIATELY run /handoff then EnterPlanMode."
+  "additionalContext": "${GAUGE} ${REMAINING}% remaining${ESTIMATED}${PROMPTS_MSG}. CRITICAL: First invoke the /handoff skill and wait for it to complete. Only AFTER the handoff file is saved, call EnterPlanMode. Do NOT enter plan mode before /handoff finishes — Write tools are disabled in plan mode."
 }
 EOF
   fi
@@ -251,7 +251,7 @@ else
   fi
   cat << EOF
 {
-  "additionalContext": "${GAUGE} ${REMAINING}% remaining${ESTIMATED}${PROMPTS_MSG}. Run /handoff then EnterPlanMode.${SPELL_LINE}"
+  "additionalContext": "${GAUGE} ${REMAINING}% remaining${ESTIMATED}${PROMPTS_MSG}. First invoke the /handoff skill and wait for it to complete. Only AFTER the handoff file is saved, call EnterPlanMode. Do NOT enter plan mode before /handoff finishes.${SPELL_LINE}"
 }
 EOF
 fi
