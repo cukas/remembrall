@@ -211,20 +211,12 @@ fi
 AUTONOMOUS_SKILL=$(remembrall_escape_json "$AUTONOMOUS_SKILL")
 
 # At or below urgent threshold — URGENT
-# Unlike other thresholds, urgent nudges repeat on EVERY prompt until a handoff
-# file exists. A single nudge gets ignored when Claude is mid-task.
+# Urgent nudges repeat on EVERY prompt. A single nudge gets ignored when Claude
+# is mid-task. We cannot check for handoff-file existence because the preemptive
+# handoff (safety net) creates the same file, which would defeat the retry.
+# When Claude actually complies (/handoff + plan mode + clear), the new session
+# resets nudge state naturally.
 if remembrall_le "$REMAINING" "$THRESHOLD_URGENT"; then
-  if [ "$LAST_NUDGE" = "urgent" ]; then
-    # Check if handoff already exists — if so, Claude complied, stop nudging
-    HASH=$(remembrall_md5 "$CWD") || true
-    if [ -n "$HASH" ]; then
-      HANDOFF_FILE="$HOME/.remembrall/handoffs/$HASH/handoff-${SESSION_ID}.md"
-      if [ -f "$HANDOFF_FILE" ]; then
-        exit 0
-      fi
-    fi
-    # No handoff yet — keep nudging (don't exit)
-  fi
   echo "urgent" > "$NUDGE_FILE"
   GAUGE=$(remembrall_gauge_plain "$REMAINING")
   if [ "$IS_AUTONOMOUS" = true ]; then
@@ -248,19 +240,7 @@ EOF
 fi
 
 # At or below warning threshold — WARNING
-# Like urgent, warning nudges repeat until handoff exists. Context quality
-# degrades fast after 30% — a single nudge isn't enough.
-if [ "$LAST_NUDGE" = "warning" ] || [ "$LAST_NUDGE" = "urgent" ]; then
-  # Check if handoff already exists — if so, Claude complied, stop nudging
-  HASH=$(remembrall_md5 "$CWD") || true
-  if [ -n "$HASH" ]; then
-    HANDOFF_FILE="$HOME/.remembrall/handoffs/$HASH/handoff-${SESSION_ID}.md"
-    if [ -f "$HANDOFF_FILE" ]; then
-      exit 0
-    fi
-  fi
-  # No handoff yet — keep nudging (don't exit)
-fi
+# Warning nudges also repeat on every prompt (same rationale as urgent above).
 echo "warning" > "$NUDGE_FILE"
 GAUGE=$(remembrall_gauge_plain "$REMAINING")
 if [ "$IS_AUTONOMOUS" = true ]; then

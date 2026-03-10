@@ -457,12 +457,13 @@ assert_match "15% urgent says MUST invoke" "MUST invoke the /handoff skill NOW" 
 OUTPUT=$(echo '{"session_id":"test-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
 assert_match "15% second time: persistent (no handoff yet)" "BLOCKING REQUIREMENT" "$OUTPUT"
 
-# Create handoff file — nudge should now be suppressed
+# Create handoff file — nudge should STILL fire (preemptive handoff creates
+# the same file, so we can't use it as a compliance signal)
 HASH=$(source "$PLUGIN_ROOT/hooks/lib.sh" && remembrall_md5 "$TEST_CWD")
 mkdir -p "$HOME/.remembrall/handoffs/$HASH"
 echo "# handoff" > "$HOME/.remembrall/handoffs/$HASH/handoff-test-sess.md"
 OUTPUT=$(echo '{"session_id":"test-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
-assert_eq "15% after handoff saved: suppressed" "" "$OUTPUT"
+assert_match "15% after handoff saved: still nudges (preemptive handoff is not compliance)" "BLOCKING REQUIREMENT" "$OUTPUT"
 rm -f "$HOME/.remembrall/handoffs/$HASH/handoff-test-sess.md"
 
 # 90% — reset (post-compaction)
