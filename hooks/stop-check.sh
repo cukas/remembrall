@@ -27,7 +27,7 @@ fi
 # Try bridge first, then transcript fallback
 REMAINING=""
 ESTIMATED=""
-CTX_FILE=$(remembrall_find_bridge "$CWD" "$SESSION_ID") 2>/dev/null
+CTX_FILE=$(remembrall_find_bridge "$CWD" "$SESSION_ID" 2>/dev/null) || CTX_FILE=""
 if [ -n "$CTX_FILE" ]; then
   REMAINING=$(cat "$CTX_FILE" 2>/dev/null)
   if ! remembrall_validate_number "$REMAINING"; then

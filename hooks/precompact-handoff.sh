@@ -30,7 +30,7 @@ if [ -z "$TRANSCRIPT_PATH" ] || [ ! -f "$TRANSCRIPT_PATH" ]; then
 fi
 
 # Calibrate: record transcript size for future context estimation
-remembrall_calibrate "$TRANSCRIPT_PATH"
+remembrall_calibrate "$TRANSCRIPT_PATH" || true
 
 # Exit if CWD not available
 if [ -z "$CWD" ]; then
