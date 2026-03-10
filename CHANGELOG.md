@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2.6.2] - 2026-03-10
+
+### Fixed
+- **Stop hook crash on every Stop event** — `stop-check.sh` had `set -euo pipefail` but `remembrall_find_bridge` returns exit 1 when the bridge file doesn't exist, killing the script silently. This caused the persistent "Failed with non-blocking status code: No stderr output" error
+- `2>/dev/null` was on the assignment side instead of inside `$()`, so stderr was never actually suppressed
+- Same pattern fixed in `context-monitor.sh` (cosmetic, no `set -e`) and `precompact-handoff.sh` (`remembrall_calibrate` unguarded — could crash if lock/jq fails)
+
 ## [2.6.1] - 2026-03-09
 
 ### Fixed
