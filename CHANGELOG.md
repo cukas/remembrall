@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2.6.3] - 2026-03-11
+
+### Fixed
+- **Gauge snippet crashes on empty `context_remaining`** — `pct` became empty string when status line JSON omitted `context_remaining`, causing bash arithmetic error that killed the entire status line. Added `pct=${pct:-0}` guard matching `hooks/lib.sh` pattern
+- **Setup command stops after bridge** — `/setup-remembrall` had section breaks causing Claude to stop after bridge install, never reaching gauge or optional features. Merged into single continuous numbered flow
+- **Gauge was opt-in instead of default** — gauge is now installed by default with opt-out option
+
 ## [2.6.2] - 2026-03-10
 
 ### Fixed
