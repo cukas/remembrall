@@ -44,10 +44,10 @@ _remembrall_ensure_bridge() {
   has_statusline=$(jq -r '.statusLine.command // empty' "$settings_file" 2>/dev/null)
   if [ -z "$has_statusline" ]; then
     # No status line — create one with bridge built in
-    local bridge_cmd='input=$(cat); session_id=$(echo "$input" | jq -r '"'"'.session_id // empty'"'"'); remaining=$(echo "$input" | jq -r '"'"'.context_remaining // empty'"'"'); CTX_DIR="/tmp/claude-context-pct"; mkdir -p "$CTX_DIR" 2>/dev/null; if [ -n "$remaining" ]; then printf "%s" "$remaining" > "$CTX_DIR/${session_id}" 2>/dev/null; fi; echo "ctx: ${remaining:-?}%"'
+    local bridge_cmd='input=$(cat); session_id=$(echo "$input" | jq -r '"'"'.session_id // empty'"'"'); remaining=$(echo "$input" | jq -r '"'"'.context_window.remaining_percentage // empty'"'"'); CTX_DIR="/tmp/claude-context-pct"; mkdir -p "$CTX_DIR" 2>/dev/null; if [ -n "$remaining" ]; then printf "%s" "$remaining" > "$CTX_DIR/${session_id}" 2>/dev/null; fi; echo "ctx: ${remaining:-?}%"'
     local tmp
     tmp=$(mktemp "${settings_file}.XXXXXX")
-    jq --arg cmd "$bridge_cmd" '.statusLine.command = $cmd' "$settings_file" > "$tmp" 2>/dev/null
+    jq --arg cmd "$bridge_cmd" '.statusLine.type = "command" | .statusLine.command = $cmd' "$settings_file" > "$tmp" 2>/dev/null
     if [ $? -eq 0 ] && [ -s "$tmp" ]; then
       mv "$tmp" "$settings_file"
       remembrall_debug "bridge status line created in settings.json"
@@ -61,7 +61,7 @@ _remembrall_ensure_bridge() {
   # Defensive check: if another plugin owns the status line command and it
   # doesn't reference standard variables (remaining, context_remaining),
   # log a warning and skip — don't clobber another plugin's status line.
-  if ! echo "$has_statusline" | grep -qE '(remaining|context_remaining)' 2>/dev/null; then
+  if ! echo "$has_statusline" | grep -qE '(remaining|remaining_percentage)' 2>/dev/null; then
     remembrall_debug "WARNING: statusLine.command exists but doesn't reference context variables — another plugin may own it. Appending bridge with care."
     echo "Remembrall: existing statusLine detected — appending bridge (won't overwrite)" >&2
   fi
@@ -88,7 +88,7 @@ _remembrall_ensure_bridge() {
   # Write back to settings.json atomically
   local tmp
   tmp=$(mktemp "${settings_file}.XXXXXX")
-  jq --arg cmd "$new_command" '.statusLine.command = $cmd' "$settings_file" > "$tmp" 2>/dev/null
+  jq --arg cmd "$new_command" '.statusLine.type = "command" | .statusLine.command = $cmd' "$settings_file" > "$tmp" 2>/dev/null
   if [ $? -eq 0 ] && [ -s "$tmp" ]; then
     mv "$tmp" "$settings_file"
     remembrall_debug "bridge auto-configured in settings.json"

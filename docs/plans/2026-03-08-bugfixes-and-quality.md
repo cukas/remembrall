@@ -357,7 +357,7 @@ mkdir -p "$HOME/.claude"
 cat > "$SETTINGS_FILE" << 'PIPE_SETTINGS'
 {
   "statusLine": {
-    "command": "input=$(cat); remaining=$(echo \"$input\" | jq -r '.context_remaining // empty'); status=\"ctx: ${remaining:-?}%\"; echo \"$status\""
+    "command": "input=$(cat); remaining=$(echo \"$input\" | jq -r '.context_window.remaining_percentage // empty'); status=\"ctx: ${remaining:-?}%\"; echo \"$status\""
   }
 }
 PIPE_SETTINGS

@@ -7,7 +7,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [2.6.3] - 2026-03-11
 
 ### Fixed
-- **Gauge snippet crashes on empty `context_remaining`** — `pct` became empty string when status line JSON omitted `context_remaining`, causing bash arithmetic error that killed the entire status line. Added `pct=${pct:-0}` guard matching `hooks/lib.sh` pattern
+- **Status line reads wrong field** — `context_remaining` was renamed to `context_window.remaining_percentage` in Claude Code's status line API. Bridge, auto-setup, and gauge all read the old field, getting empty string every time. Updated all references.
+- **Gauge snippet crashes on empty percentage** — `pct` became empty string causing bash arithmetic error that killed the entire status line. Added `pct=${pct:-100}` guard (defaults to full bar when unknown)
 - **Setup command stops after bridge** — `/setup-remembrall` had section breaks causing Claude to stop after bridge install, never reaching gauge or optional features. Merged into single continuous numbered flow
 - **Gauge was opt-in instead of default** — gauge is now installed by default with opt-out option
 

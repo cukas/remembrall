@@ -958,7 +958,7 @@ SETTINGS_FILE="$HOME/.claude/settings.json"
 mkdir -p "$HOME/.claude"
 printf '%s\n' '{
   "statusLine": {
-    "command": "input=$(cat); session_id=$(echo \"$input\" | jq -r '"'"'.session_id // empty'"'"'); remaining=$(echo \"$input\" | jq -r '"'"'.context_remaining // empty'"'"'); status=\"ctx: ${remaining}%\"; echo \"$status\""
+    "command": "input=$(cat); session_id=$(echo \"$input\" | jq -r '"'"'.session_id // empty'"'"'); remaining=$(echo \"$input\" | jq -r '"'"'.context_window.remaining_percentage // empty'"'"'); status=\"ctx: ${remaining}%\"; echo \"$status\""
   }
 }' > "$SETTINGS_FILE"
 
@@ -1325,7 +1325,7 @@ mkdir -p "$HOME/.claude"
 cat > "$SETTINGS_FILE" << 'PIPE_SETTINGS'
 {
   "statusLine": {
-    "command": "input=$(cat); remaining=$(echo \"$input\" | jq -r '.context_remaining // empty'); status=\"ctx: ${remaining:-?}%\"; echo \"$status\""
+    "command": "input=$(cat); remaining=$(echo \"$input\" | jq -r '.context_window.remaining_percentage // empty'); status=\"ctx: ${remaining:-?}%\"; echo \"$status\""
   }
 }
 PIPE_SETTINGS
