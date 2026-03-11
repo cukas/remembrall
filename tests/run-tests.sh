@@ -429,7 +429,7 @@ assert_eq "85% remaining: silent" "" "$OUTPUT"
 echo "50" > "$CTX_DIR/test-sess"
 rm -f "/tmp/remembrall-nudges/test-sess"
 OUTPUT=$(echo '{"session_id":"test-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
-assert_match "50% triggers checkpoint nudge" "remaining.*save progress" "$OUTPUT"
+assert_match "50% triggers checkpoint nudge" "REMEMBRALL:.*save progress" "$OUTPUT"
 assert_match "50% checkpoint suggests /handoff" "/handoff" "$OUTPUT"
 
 # 50% again — should be suppressed (already nudged)
@@ -439,23 +439,23 @@ assert_eq "50% second time: suppressed" "" "$OUTPUT"
 # 25% — warning with plan mode
 echo "25" > "$CTX_DIR/test-sess"
 OUTPUT=$(echo '{"session_id":"test-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
-assert_match "25% triggers warning" "remaining.*BLOCKING REQUIREMENT" "$OUTPUT"
+assert_match "25% triggers warning" "REMEMBRALL_WARN.*EnterPlanMode" "$OUTPUT"
 assert_match "25% warning suggests EnterPlanMode" "EnterPlanMode" "$OUTPUT"
 
 # 25% again — persistent (no handoff yet)
 OUTPUT=$(echo '{"session_id":"test-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
-assert_match "25% second time: persistent (no handoff yet)" "BLOCKING REQUIREMENT" "$OUTPUT"
+assert_match "25% second time: persistent (no handoff yet)" "REMEMBRALL_WARN" "$OUTPUT"
 
 # 15% — urgent with plan mode
 echo "15" > "$CTX_DIR/test-sess"
 OUTPUT=$(echo '{"session_id":"test-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
-assert_match "15% triggers urgent" "remaining.*BLOCKING REQUIREMENT" "$OUTPUT"
+assert_match "15% triggers urgent" "REMEMBRALL_URGENT.*critical" "$OUTPUT"
 assert_match "15% urgent requires EnterPlanMode" "EnterPlanMode" "$OUTPUT"
-assert_match "15% urgent says MUST invoke" "MUST invoke the /handoff skill NOW" "$OUTPUT"
+assert_match "15% urgent says run /handoff NOW" "Run /handoff NOW" "$OUTPUT"
 
-# 15% again — persistent (repeats until handoff exists)
+# 15% again — stage 2: block (second consecutive prompt at ≤15%)
 OUTPUT=$(echo '{"session_id":"test-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
-assert_match "15% second time: persistent (no handoff yet)" "BLOCKING REQUIREMENT" "$OUTPUT"
+assert_match "15% second time: block (two-stage escalation)" "decision.*block" "$OUTPUT"
 
 # Create handoff file — nudge should STILL fire (preemptive handoff creates
 # the same file, so we can't use it as a compliance signal)
@@ -463,7 +463,7 @@ HASH=$(source "$PLUGIN_ROOT/hooks/lib.sh" && remembrall_md5 "$TEST_CWD")
 mkdir -p "$HOME/.remembrall/handoffs/$HASH"
 echo "# handoff" > "$HOME/.remembrall/handoffs/$HASH/handoff-test-sess.md"
 OUTPUT=$(echo '{"session_id":"test-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
-assert_match "15% after handoff saved: still nudges (preemptive handoff is not compliance)" "BLOCKING REQUIREMENT" "$OUTPUT"
+assert_match "15% after handoff saved: block with clear+replay message" "Handoff already saved.*clear" "$OUTPUT"
 rm -f "$HOME/.remembrall/handoffs/$HASH/handoff-test-sess.md"
 
 # 90% — reset (post-compaction)
@@ -513,7 +513,7 @@ fi
 echo "15" > "$CTX_DIR/test-auto-sess"
 OUTPUT=$(echo '{"session_id":"test-auto-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
 assert_match "15% autonomous urgent: mentions AUTONOMOUS MODE" "AUTONOMOUS MODE" "$OUTPUT"
-assert_match "15% autonomous urgent: says IMMEDIATELY" "IMMEDIATELY" "$OUTPUT"
+assert_match "15% autonomous urgent: says /handoff NOW" "/handoff NOW" "$OUTPUT"
 if echo "$OUTPUT" | grep -q "EnterPlanMode"; then
   printf "${RED}  FAIL${RESET} 15%% autonomous urgent: must NOT mention EnterPlanMode\n"
   FAIL=$((FAIL + 1))
@@ -553,11 +553,19 @@ rm -f "/tmp/remembrall-nudges/test-auto-sess" "/tmp/remembrall-nudges/test-auto-
 echo ""
 echo "session-resume.sh:"
 
-# Fresh start — should exit silently (no bridge nudge anymore)
+# Fresh start — should emit standing instruction
 TEST_CWD="/tmp/remembrall-test-resume-$$"
 mkdir -p "$TEST_CWD"
 OUTPUT=$(echo '{"source":"fresh","session_id":"test-resume","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/session-resume.sh" 2>/dev/null)
-assert_eq "fresh start: silent (no bridge nudge)" "" "$OUTPUT"
+assert_match "fresh start: emits standing instruction" "REMEMBRALL ACTIVE" "$OUTPUT"
+assert_match "fresh start: uses hookSpecificOutput format" "hookSpecificOutput" "$OUTPUT"
+
+# Compact/clear resume WITHOUT handoff — should still emit standing instruction
+COMPACT_CWD="/tmp/remembrall-test-compact-nohoff-$$"
+mkdir -p "$COMPACT_CWD"
+OUTPUT=$(echo '{"source":"compact","session_id":"test-compact-nohoff","cwd":"'"$COMPACT_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/session-resume.sh" 2>/dev/null)
+assert_match "compact without handoff: emits standing instruction" "REMEMBRALL ACTIVE" "$OUTPUT"
+rm -rf "$COMPACT_CWD"
 
 # Compact resume with handoff file
 HASH=$(remembrall_md5 "$TEST_CWD")

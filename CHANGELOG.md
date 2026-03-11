@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2.7.0] - 2026-03-11
+
+### Fixed
+- **Claude ignores context nudges** — wrong JSON format (`additionalContext` vs `hookSpecificOutput`) caused Claude to silently discard all nudge messages. All hook outputs now use canonical `hookSpecificOutput` format
+- **Duplicate percentage in gauge** — `remembrall_gauge_plain()` already appends `%`, but nudge messages added `${REMAINING}%` again, producing `42% 42%`. Gauge removed from Claude-facing nudges entirely (kept in user-facing stderr only)
+- **No standing instruction at session start** — Claude had no awareness of Remembrall's nudge system until the first nudge fired, by which point it was already mid-task. Now emits compliance instruction on every SessionStart
+
+### Changed
+- **Thresholds shifted to 60/35/15** (was 60/30/20) — gives one more turn at 35% warning, makes blocking a true last resort at 15%
+- **Two-stage urgent escalation** — first prompt at ≤15% gets urgent nudge, second consecutive prompt gets hard-blocked with `/clear + /replay` instructions
+- **Terse nudge messages** — stripped gauge bars, easter eggs (journal only), and verbose instructions. Messages now use `REMEMBRALL_WARN:` / `REMEMBRALL_URGENT:` prefixes for reliable Claude detection
+- **Block guardrails** — never block on estimated values (only bridge-confirmed), never block autonomous sessions, only block after two-stage escalation
+
+### Added
+- Standing instruction emitted on every SessionStart (fresh, compact, clear — all paths) via `hookSpecificOutput`. Mode-neutral wording ("comply with its instructions") avoids conflicting with autonomous nudges
+- Version guard at SessionStart cleans stale temp files when plugin version changes
+- `session_id` included in debug log for easier troubleshooting
+
 ## [2.6.3] - 2026-03-11
 
 ### Fixed

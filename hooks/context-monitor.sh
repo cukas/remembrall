@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # UserPromptSubmit hook: monitors actual context % via status-line bridge
-# Triggers journal checkpoint at configurable thresholds (default: 60%, 30%, 20%)
+# Triggers journal checkpoint at configurable thresholds (default: 60%, 35%, 15%)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 export REMEMBRALL_HOOK="context-monitor"
@@ -58,7 +58,10 @@ if [ "$BRIDGE_ACTIVE" = false ]; then
       # No bridge in settings — request Claude to write it manually (one-time, ~20 tokens)
       cat << BOOTSTRAP_EOF
 {
-  "additionalContext": "Write your context remaining % as an integer to /tmp/claude-context-pct/${SESSION_ID}"
+  "hookSpecificOutput": {
+    "hookEventName": "UserPromptSubmit",
+    "additionalContext": "Write your context remaining % as an integer to /tmp/claude-context-pct/${SESSION_ID}"
+  }
 }
 BOOTSTRAP_EOF
       exit 0
@@ -82,10 +85,8 @@ fi
 
 # ── Configurable thresholds ───────────────────────────────────────
 THRESHOLD_JOURNAL=$(remembrall_threshold "journal" 60)
-THRESHOLD_WARNING=$(remembrall_threshold "warning" 30)
-THRESHOLD_URGENT=$(remembrall_threshold "urgent" 20)
-
-remembrall_debug "thresholds: journal=${THRESHOLD_JOURNAL} warning=${THRESHOLD_WARNING} urgent=${THRESHOLD_URGENT} remaining=${REMAINING}"
+THRESHOLD_WARNING=$(remembrall_threshold "warning" 35)
+THRESHOLD_URGENT=$(remembrall_threshold "urgent" 15)
 
 # Nudge tracking — don't spam every prompt
 NUDGE_DIR="/tmp/remembrall-nudges"
@@ -96,6 +97,8 @@ LAST_NUDGE=""
 if [ -f "$NUDGE_FILE" ]; then
   LAST_NUDGE=$(cat "$NUDGE_FILE")
 fi
+
+remembrall_debug "session=${SESSION_ID} remaining=${REMAINING} bridge=${BRIDGE_ACTIVE} nudge=${LAST_NUDGE}"
 
 # Reset nudge state if context recovered (post-compaction: remaining > journal threshold + 20%)
 RESET_THRESHOLD=$((THRESHOLD_JOURNAL + 20))
@@ -146,9 +149,9 @@ if [ -n "$TRANSCRIPT_PATH" ] && [ -f "$TRANSCRIPT_PATH" ]; then
       if [ -z "$_content_max" ] || [ "$_content_max" -eq 0 ] 2>/dev/null; then
         _content_max=$(remembrall_default_content_max "$MODEL_NAME")
       fi
-      PROMPTS_LEFT=$(remembrall_prompts_until_threshold "$CONTENT_BYTES" "$AVG_GROWTH" "$_content_max" 20 2>/dev/null)
+      PROMPTS_LEFT=$(remembrall_prompts_until_threshold "$CONTENT_BYTES" "$AVG_GROWTH" "$_content_max" "$THRESHOLD_URGENT" 2>/dev/null)
       if [ -n "$PROMPTS_LEFT" ] && [ "$PROMPTS_LEFT" -gt 0 ] 2>/dev/null; then
-        PROMPTS_MSG=" (~${PROMPTS_LEFT} prompts to 20%)"
+        PROMPTS_MSG=" (~${PROMPTS_LEFT} prompts to ${THRESHOLD_URGENT}%)"
       fi
       if [ "$IS_VOLATILE" = "1" ]; then
         PROMPTS_MSG="${PROMPTS_MSG} [volatile session]"
@@ -163,14 +166,16 @@ if remembrall_gt "$REMAINING" "$THRESHOLD_WARNING"; then
     exit 0
   fi
   echo "journal" > "$NUDGE_FILE"
-  GAUGE=$(remembrall_gauge_plain "$REMAINING")
   SPELL_LINE=""
   if [ "$(remembrall_config "easter_eggs" "true")" = "true" ]; then
     SPELL_LINE=" Spells: Expecto Patronum=/handoff, Lumos=/status, Accio=/replay, Prior Incantato=handoff count this session (only if user speaks HP)"
   fi
   cat << EOF
 {
-  "additionalContext": "${GAUGE} ${REMAINING}% remaining${ESTIMATED}${PROMPTS_MSG}. Run /handoff to save progress.${SPELL_LINE}"
+  "hookSpecificOutput": {
+    "hookEventName": "UserPromptSubmit",
+    "additionalContext": "REMEMBRALL: Context at ${REMAINING}%.${PROMPTS_MSG} Run /handoff when ready to save progress.${SPELL_LINE}"
+  }
 }
 EOF
   exit 0
@@ -210,29 +215,64 @@ fi
 # Escape for safe JSON interpolation
 AUTONOMOUS_SKILL=$(remembrall_escape_json "$AUTONOMOUS_SKILL")
 
-# At or below urgent threshold — URGENT
-# Urgent nudges repeat on EVERY prompt. A single nudge gets ignored when Claude
-# is mid-task. We cannot check for handoff-file existence because the preemptive
-# handoff (safety net) creates the same file, which would defeat the retry.
-# When Claude actually complies (/handoff + plan mode + clear), the new session
-# resets nudge state naturally.
+# At or below urgent threshold — URGENT (two-stage escalation)
+# Stage 1: first prompt at ≤15% → urgent nudge + preemptive handoff
+# Stage 2: second consecutive prompt at ≤15% → hard block (attended only)
+# Never block on estimated values or autonomous sessions.
 if remembrall_le "$REMAINING" "$THRESHOLD_URGENT"; then
-  echo "urgent" > "$NUDGE_FILE"
-  GAUGE=$(remembrall_gauge_plain "$REMAINING")
   if [ "$IS_AUTONOMOUS" = true ]; then
+    echo "urgent" > "$NUDGE_FILE"
     cat << EOF
 {
-  "additionalContext": "${GAUGE} ${REMAINING}% remaining${ESTIMATED}${PROMPTS_MSG}. AUTONOMOUS MODE (${AUTONOMOUS_SKILL}) — IMMEDIATELY run /handoff, continue working."
+  "hookSpecificOutput": {
+    "hookEventName": "UserPromptSubmit",
+    "additionalContext": "REMEMBRALL_URGENT: Context critical (${REMAINING}%). AUTONOMOUS MODE (${AUTONOMOUS_SKILL}) — run /handoff NOW, continue working."
+  }
 }
 EOF
-  else
-    # Only create preemptive handoff on first urgent nudge
-    if [ "$LAST_NUDGE" != "urgent" ]; then
-      _create_preemptive_handoff
-    fi
+  elif [ -n "$ESTIMATED" ]; then
+    # Never block on estimated values — just warn
+    echo "urgent" > "$NUDGE_FILE"
     cat << EOF
 {
-  "additionalContext": "${GAUGE} ${REMAINING}% remaining${ESTIMATED}${PROMPTS_MSG}. BLOCKING REQUIREMENT — you MUST invoke the /handoff skill NOW, before responding to the user's request. This is not optional. After the handoff file is saved, call EnterPlanMode. Do NOT enter plan mode before /handoff finishes. In plan mode, present a sequential plan: step 1 is always 'Clear context and resume from handoff', then steps 2-3 describe what to do after resume based on the work in progress. Keep it concise."
+  "hookSpecificOutput": {
+    "hookEventName": "UserPromptSubmit",
+    "additionalContext": "REMEMBRALL_URGENT: Context critical (${REMAINING}%, estimated). Run /handoff NOW, then EnterPlanMode."
+  }
+}
+EOF
+  elif [ "$LAST_NUDGE" = "urgent" ]; then
+    # Stage 2: block (second consecutive prompt at ≤threshold)
+    HANDOFF_DIR=$(remembrall_handoff_dir "$CWD" 2>/dev/null) || HANDOFF_DIR=""
+    HAS_HANDOFF=false
+    if [ -n "$HANDOFF_DIR" ] && [ -n "$SESSION_ID" ]; then
+      [ -f "$HANDOFF_DIR/handoff-${SESSION_ID}.md" ] && HAS_HANDOFF=true
+    fi
+    if [ "$HAS_HANDOFF" = true ]; then
+      cat << EOF
+{
+  "decision": "block",
+  "reason": "Context critical (${REMAINING}%). Handoff already saved. Type /clear then /replay to continue."
+}
+EOF
+    else
+      cat << EOF
+{
+  "decision": "block",
+  "reason": "Context critical (${REMAINING}%). Type /handoff to save work, then /clear and /replay."
+}
+EOF
+    fi
+  else
+    # Stage 1: first prompt at ≤threshold — urgent nudge
+    echo "urgent" > "$NUDGE_FILE"
+    _create_preemptive_handoff
+    cat << EOF
+{
+  "hookSpecificOutput": {
+    "hookEventName": "UserPromptSubmit",
+    "additionalContext": "REMEMBRALL_URGENT: Context critical (${REMAINING}%). Run /handoff NOW, then EnterPlanMode."
+  }
 }
 EOF
   fi
@@ -240,13 +280,15 @@ EOF
 fi
 
 # At or below warning threshold — WARNING
-# Warning nudges also repeat on every prompt (same rationale as urgent above).
+# Warning nudges repeat on every prompt until handoff compliance.
 echo "warning" > "$NUDGE_FILE"
-GAUGE=$(remembrall_gauge_plain "$REMAINING")
 if [ "$IS_AUTONOMOUS" = true ]; then
   cat << EOF
 {
-  "additionalContext": "${GAUGE} ${REMAINING}% remaining${ESTIMATED}${PROMPTS_MSG}. AUTONOMOUS MODE (${AUTONOMOUS_SKILL}) — run /handoff, continue working."
+  "hookSpecificOutput": {
+    "hookEventName": "UserPromptSubmit",
+    "additionalContext": "REMEMBRALL_WARN: Context at ${REMAINING}%. AUTONOMOUS MODE (${AUTONOMOUS_SKILL}) — run /handoff, continue working."
+  }
 }
 EOF
 else
@@ -254,13 +296,12 @@ else
   if [ "$LAST_NUDGE" != "warning" ] && [ "$LAST_NUDGE" != "urgent" ]; then
     _create_preemptive_handoff
   fi
-  SPELL_LINE=""
-  if [ "$(remembrall_config "easter_eggs" "true")" = "true" ]; then
-    SPELL_LINE=" Spells: Expecto Patronum=/handoff, Lumos=/status, Accio=/replay, Prior Incantato=handoff count this session (only if user speaks HP)"
-  fi
   cat << EOF
 {
-  "additionalContext": "${GAUGE} ${REMAINING}% remaining${ESTIMATED}${PROMPTS_MSG}. BLOCKING REQUIREMENT — invoke the /handoff skill NOW, before responding to the user's request. This is not optional. After the handoff file is saved, call EnterPlanMode. Do NOT enter plan mode before /handoff finishes. In plan mode, present a sequential plan: step 1 is always 'Clear context and resume from handoff', then steps 2-3 describe what to do after resume based on the work in progress. Keep it concise.${SPELL_LINE}"
+  "hookSpecificOutput": {
+    "hookEventName": "UserPromptSubmit",
+    "additionalContext": "REMEMBRALL_WARN: Context at ${REMAINING}%. Run /handoff, then EnterPlanMode before answering."
+  }
 }
 EOF
 fi

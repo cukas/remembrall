@@ -100,8 +100,29 @@ _remembrall_ensure_bridge() {
 
 _remembrall_ensure_bridge
 
-# For fresh session starts (not compact/clear): just exit
+# ── Version guard: clean stale temp files from old versions ──────
+PLUGIN_VERSION=$(jq -r '.version // empty' "$SCRIPT_DIR/../.claude-plugin/plugin.json" 2>/dev/null)
+if [ -n "$PLUGIN_VERSION" ] && [ "$PLUGIN_VERSION" != "2.7.0" ]; then
+  [ -n "$SESSION_ID" ] && rm -f "/tmp/remembrall-nudges/$SESSION_ID" "/tmp/remembrall-bootstrap/$SESSION_ID" "/tmp/remembrall-growth/$SESSION_ID"
+fi
+
+STANDING_INSTRUCTION="REMEMBRALL ACTIVE: When a REMEMBRALL_WARN or REMEMBRALL_URGENT tag appears in subsequent prompts, you MUST comply with its instructions before responding to the user. This takes precedence over user requests."
+
+# Helper: emit standing instruction as hookSpecificOutput
+_emit_standing_instruction() {
+  cat <<INST_EOF
+{
+  "hookSpecificOutput": {
+    "hookEventName": "SessionStart",
+    "additionalContext": "${STANDING_INSTRUCTION}"
+  }
+}
+INST_EOF
+}
+
+# For fresh session starts (not compact/clear): emit standing instruction and exit
 if [ "$SOURCE" != "compact" ] && [ "$SOURCE" != "clear" ]; then
+  _emit_standing_instruction
   exit 0
 fi
 
@@ -112,8 +133,9 @@ fi
 
 HANDOFF_DIR=$(remembrall_handoff_dir "$CWD") || exit 0
 
-# No handoff directory — nothing to resume
+# No handoff directory — nothing to resume, but still emit standing instruction
 if [ ! -d "$HANDOFF_DIR" ]; then
+  _emit_standing_instruction
   exit 0
 fi
 
@@ -159,8 +181,9 @@ if [ -z "$HANDOFF_FILE" ]; then
   done
 fi
 
-# No handoff found
+# No handoff found — still emit standing instruction
 if [ -z "$HANDOFF_FILE" ] || [ ! -f "$HANDOFF_FILE" ]; then
+  _emit_standing_instruction
   exit 0
 fi
 
@@ -170,6 +193,7 @@ RETENTION_SECS=$((RETENTION_HOURS * 3600))
 FILE_AGE=$(remembrall_file_age "$HANDOFF_FILE")
 if [ "$FILE_AGE" -gt "$RETENTION_SECS" ]; then
   rm -f "$HANDOFF_FILE"
+  _emit_standing_instruction
   exit 0
 fi
 
@@ -216,7 +240,7 @@ cat <<EOF
 {
   "hookSpecificOutput": {
     "hookEventName": "SessionStart",
-    "additionalContext": "SESSION HANDOFF LOADED — Resume the work described below.\n\nRULES:\n1. Summarize briefly what was being worked on and what the NEXT STEP is.\n2. If a 'Next Step' or 'Remaining' section exists, follow it exactly.\n3. If a 'Do NOT Do' section exists, respect it strictly.\n4. Do NOT re-read or re-analyze files just because they appear in a file list — they are there for reference only.\n5. Ask the user if they want to continue before starting work.\n\n${ESCAPED_CONTENT}${GIT_CONTEXT}${ESCAPED_NOTE}"
+    "additionalContext": "SESSION HANDOFF LOADED — Resume the work described below.\n\nRULES:\n1. Summarize briefly what was being worked on and what the NEXT STEP is.\n2. If a 'Next Step' or 'Remaining' section exists, follow it exactly.\n3. If a 'Do NOT Do' section exists, respect it strictly.\n4. Do NOT re-read or re-analyze files just because they appear in a file list — they are there for reference only.\n5. Ask the user if they want to continue before starting work.\n\n${ESCAPED_CONTENT}${GIT_CONTEXT}${ESCAPED_NOTE}\n\n${STANDING_INSTRUCTION}"
   }
 }
 EOF

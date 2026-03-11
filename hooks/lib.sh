@@ -46,8 +46,8 @@ remembrall_debug() {
 # ─── Configurable Thresholds ──────────────────────────────────────
 # Users can override nudge thresholds via config.json:
 #   threshold_journal (default: 60) — first nudge: "run /handoff"
-#   threshold_warning (default: 30) — second nudge: "run /handoff then EnterPlanMode"
-#   threshold_urgent  (default: 20) — final nudge: "IMMEDIATELY"
+#   threshold_warning (default: 35) — second nudge: "run /handoff then EnterPlanMode"
+#   threshold_urgent  (default: 15) — final nudge: two-stage block
 
 remembrall_threshold() {
   local name="$1"

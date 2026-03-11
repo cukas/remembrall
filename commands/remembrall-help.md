@@ -37,12 +37,12 @@ Show the user this reference:
 
 ```
 100% ████████████████████  — working normally
- 60% ████████████░░░░░░░░  — nudge: suggests /handoff (fires once in 31-60% band)
- 30% ██████░░░░░░░░░░░░░░  — plan mode (or /handoff if autonomous)
- 20% ████░░░░░░░░░░░░░░░░  — URGENT plan mode (or immediate /handoff)
+ 60% ████████████░░░░░░░░  — nudge: suggests /handoff (fires once in 36-60% band)
+ 35% ███████░░░░░░░░░░░░░  — warning: /handoff then EnterPlanMode (every prompt)
+ 15% ███░░░░░░░░░░░░░░░░░  — urgent: two-stage escalation (nudge → block)
   0% ░░░░░░░░░░░░░░░░░░░░  — auto-compaction safety net fires
 ```
 
-**Attended** (default): At <=30%, Claude runs `/handoff` then enters plan mode. At <=20%, same but with urgent priority. User clicks "clear context" → fresh start.
+**Attended** (default): At <=35%, Claude runs `/handoff` then enters plan mode. At <=15%, first prompt gets urgent nudge, second consecutive prompt blocks until `/clear + /replay`. User clicks "clear context" → fresh start.
 
-**Autonomous** (`/autonomous` to toggle): At <=30%, Claude runs `/handoff` → continues working → auto-compaction recycles context automatically. No human needed.
+**Autonomous** (`/autonomous` to toggle): At <=35%, Claude runs `/handoff` → continues working → auto-compaction recycles context automatically. No human needed.
