@@ -302,7 +302,7 @@ else
 {
   "hookSpecificOutput": {
     "hookEventName": "UserPromptSubmit",
-    "additionalContext": "REMEMBRALL_WARN: Context at ${REMAINING}%. BLOCKING REQUIREMENT: You MUST immediately call EnterPlanMode before continuing."
+    "additionalContext": "REMEMBRALL_WARN: Context at ${REMAINING}%. BLOCKING REQUIREMENT: You MUST run /handoff and immediately call EnterPlanMode before continuing."
   },
   "systemMessage": "BLOCKING REQUIREMENT: You MUST immediately call EnterPlanMode to address the low context remaining (${REMAINING}%). This is REQUIRED before performing any further tasks."
 }

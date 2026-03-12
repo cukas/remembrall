@@ -451,7 +451,7 @@ echo "15" > "$CTX_DIR/test-sess"
 OUTPUT=$(echo '{"session_id":"test-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
 assert_match "15% triggers urgent" "REMEMBRALL_URGENT.*critical" "$OUTPUT"
 assert_match "15% urgent requires EnterPlanMode" "EnterPlanMode" "$OUTPUT"
-assert_match "15% urgent says run /handoff NOW" "Run /handoff NOW" "$OUTPUT"
+assert_match "15% urgent says run /handoff NOW" "run /handoff NOW" "$OUTPUT"
 
 # 15% again — stage 2: block (second consecutive prompt at ≤15%)
 OUTPUT=$(echo '{"session_id":"test-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
