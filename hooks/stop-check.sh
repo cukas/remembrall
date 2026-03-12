@@ -62,13 +62,11 @@ if [ "$HANDOFF_EXISTS" = true ]; then
   GAUGE=$(remembrall_gauge "$REMAINING")
   echo "Remembrall: ${GAUGE} remaining${ESTIMATED}. Handoff saved. Consider /clear + /replay before new work." >&2
 else
-  # No handoff — enforce handoff creation via hookSpecificOutput (plain text for JSON)
+  # No handoff — block stop and ask user to save handoff first
   cat << EOF
 {
-  "hookSpecificOutput": {
-    "hookEventName": "Stop",
-    "additionalContext": "REMEMBRALL_WARN: Context at ${REMAINING}%${ESTIMATED}. You MUST run /handoff before completing this task. Do not stop without saving state."
-  }
+  "decision": "block",
+  "reason": "REMEMBRALL_WARN: Context at ${REMAINING}%${ESTIMATED}. You MUST run /handoff before completing this task. Do not stop without saving state."
 }
 EOF
 fi

@@ -237,8 +237,9 @@ EOF
 {
   "hookSpecificOutput": {
     "hookEventName": "UserPromptSubmit",
-    "additionalContext": "REMEMBRALL_URGENT: Context critical (${REMAINING}%, estimated). Run /handoff NOW, then EnterPlanMode."
-  }
+    "additionalContext": "REMEMBRALL_URGENT: Context critical (${REMAINING}%, estimated). BLOCKING REQUIREMENT: You MUST run /handoff NOW, then call EnterPlanMode immediately."
+  },
+  "systemMessage": "BLOCKING REQUIREMENT: Context is CRITICAL (${REMAINING}%, estimated). You MUST immediately run /handoff to save progress, followed by EnterPlanMode. Do NOT proceed with other tasks until this is complete."
 }
 EOF
   elif [ "$LAST_NUDGE" = "urgent" ]; then
@@ -271,8 +272,9 @@ EOF
 {
   "hookSpecificOutput": {
     "hookEventName": "UserPromptSubmit",
-    "additionalContext": "REMEMBRALL_URGENT: Context critical (${REMAINING}%). Run /handoff NOW, then EnterPlanMode."
-  }
+    "additionalContext": "REMEMBRALL_URGENT: Context critical (${REMAINING}%). BLOCKING REQUIREMENT: You MUST run /handoff NOW, then call EnterPlanMode immediately."
+  },
+  "systemMessage": "BLOCKING REQUIREMENT: Context is CRITICAL (${REMAINING}%). You MUST immediately run /handoff to save progress, followed by EnterPlanMode. Do NOT proceed with other tasks until this is complete."
 }
 EOF
   fi
@@ -300,8 +302,9 @@ else
 {
   "hookSpecificOutput": {
     "hookEventName": "UserPromptSubmit",
-    "additionalContext": "REMEMBRALL_WARN: Context at ${REMAINING}%. Run /handoff, then EnterPlanMode before answering."
-  }
+    "additionalContext": "REMEMBRALL_WARN: Context at ${REMAINING}%. BLOCKING REQUIREMENT: You MUST immediately call EnterPlanMode before continuing."
+  },
+  "systemMessage": "BLOCKING REQUIREMENT: You MUST immediately call EnterPlanMode to address the low context remaining (${REMAINING}%). This is REQUIRED before performing any further tasks."
 }
 EOF
 fi
