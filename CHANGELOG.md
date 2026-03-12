@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2.7.1] - 2026-03-12
+
+### Fixed
+- **Stop hook uses wrong JSON schema** — was `hookSpecificOutput` (advisory) when it should be `decision: block` to actually prevent Claude from stopping without a handoff
+- **Stronger plan mode enforcement** — added `systemMessage` alongside `hookSpecificOutput` in warning and urgent nudges for more reliable Claude compliance
+- **plugin.json version mismatch** — synced to 2.7.1
+
 ## [2.7.0] - 2026-03-11
 
 ### Fixed
