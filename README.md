@@ -32,6 +32,8 @@ The gauge auto-configures on first session. Run `/setup-remembrall` to customize
 🔮 [█████░░░░░] 50% ✦            orange, sparkle
 🔮 [███░░░░░░░] 28% ⚡            lightning, danger
 💀 [██░░░░░░░░] 15% Obliviate!   memory wipe incoming — pulsing 🔮↔💀
+🔮 [███░░░░░░░] 28% ⚡ ⏳TT       Time-Turner agent working in parallel
+🔮 [████████░░] 80%    ✅TT       Time-Turner finished — /timeturner merge
 ```
 
 <p align="center">
