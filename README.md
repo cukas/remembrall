@@ -8,7 +8,7 @@
   <img src="docs/remembrall-hero.png" alt="Remembrall — context: 15%" width="400" />
 </p>
 
-**Context runs out → work gets lost.** Remembrall fixes that.
+**Context runs out. Work gets lost.** Remembrall fixes that — with session memory, parallel agents, ambient learning, and context management that makes the 200K token limit feel unlimited.
 
 > **Zero external dependencies.** No databases, no MCP servers, no API keys. Just Claude Code's native hooks and plan mode. Install and forget — it works out of the box.
 
@@ -40,86 +40,117 @@ The gauge auto-configures on first session. Run `/setup-remembrall` to customize
 
 ---
 
+## What's New in v3.0.0
+
+### The Pensieve — Session Memory That Survives Compaction
+
+Tracks every file read/edit, command, and error throughout a session into structured JSONL. When compaction or handoff happens, the raw data is distilled into a summary and injected into the next session. Claude retains structured knowledge of what it did — even across compactions and session resets.
+
+On by default. Config: `pensieve: true`
+
+### Time-Turner — Parallel Agents at Low Context
+
+At a configurable threshold (default 30%), spawns a headless `claude -p` agent in a git worktree with remaining tasks. The agent works independently while the main session compacts. On next resume, offers to merge changes via `/timeturner merge`.
+
+Opt-in only. Config: `time_turner: false`
+
+### The Marauder's Map — Visual Session Overview
+
+`/map` shows context gauge, files explored with R/E tags, commands with colored exit codes, error counts, burn rate, and Time-Turner status. Built from Pensieve data.
+
+### Session Lineage — Full Session DAG
+
+Every session (main, compacted, Time-Turner) is recorded in a lineage index with parent/child relationships. `/lineage` renders a text DAG showing session ancestry, branches, and merge status.
+
+Config: `lineage: true`, `lineage_max_entries: 50`
+
+### Ambient Learning / Insights — The Pensieve Remembers
+
+Aggregates Pensieve session data into actionable patterns: file hotspots, workflow patterns (test-before-commit), error recurrence, and session statistics. Background aggregation on SessionStart. `/insights` to view.
+
+Config: `insights: true`, `insights_min_sessions: 3`
+
+### Obliviate — Semantic Context Pruning
+
+Memory staleness analyzer that cross-references memory files with Pensieve data. Identifies stale memories not accessed in recent sessions and offers guided pruning. Archives instead of deleting.
+
+Config: `obliviate: true`, `obliviate_stale_sessions: 5`
+
+### Context Budget — The Sorting Hat
+
+Classifies context consumption into code, conversation, and memory categories. Compares actuals vs configured budgets and warns when categories are imbalanced.
+
+Opt-in. Config: `budget_enabled: false`, `budget_code: 50`, `budget_conversation: 30`, `budget_memory: 20`
+
+### Patrol Integration — Owl Post
+
+File-based signal protocol for [Patrol](https://github.com/cukas/patrol) plugin interop. Patrol is fully optional — zero behavior change when not installed. Signal types: `handoff_trigger`, `context_alert`.
+
+Config: `patrol_integration: true`, `patrol_signal_ttl: 300`
+
+---
+
 ## How It Works
 
-> **Zero-setup by default.** Remembrall auto-configures the status-line bridge on first session start and derives per-user context limits from bridge data. No compaction events needed — the estimator calibrates once the session has used 20% of context.
-
 ```
-┌──────────────────────────────────────────────────────────────────────┐
-│                         Claude Code Session                          │
-│                                                                      │
-│  Status Line ──writes──> /tmp/claude-context-pct/{session_id}        │
-│       │                          │                                   │
-│       │                   context-monitor.sh                         │
-│       │                   (UserPromptSubmit)                         │
-│       │                          │                                   │
-│       │              bridge found? ──┐── no?                         │
-│       │                  │           │    │                          │
-│       │              use bridge   estimate from                      │
-│       │                  │        transcript size                    │
-│       │                  ▼           ▼                               │
-│       │            >journal%? ── do nothing (silent)                  │
-│       │                  │                                           │
-│       │           <=journal%? ── early handoff nudge (default 60%)    │
-│       │                  │                                           │
-│       │           <=warning%? ── autonomous mode?   (default 30%)    │
-│       │                  │         │                                 │
-│       │                  │    ┌────┴────┐                            │
-│       │                  │    no        yes                          │
-│       │                  │    │         │                            │
-│       │                  │    │    /handoff + continue               │
-│       │                  │    │    (auto-compaction recycles)        │
-│       │                  │    │                                      │
-│       │                  │    Claude runs /handoff                    │
-│       │                  │    (captures task, files, decisions,       │
-│       │                  │     "Resume With" methodology,            │
-│       │                  │     active tools/agents/skills)           │
-│       │                  │    then calls EnterPlanMode               │
-│       │                  │         │                                 │
-│       │            <=urgent%? ── same, but IMMEDIATELY (default 20%) │
-│       │                  │                                           │
-│       │                  ▼                                           │
-│       │            Plan mode UI appears:                             │
-│       │            "Yes, clear context"                              │
-│       │            User clicks → fresh context                       │
-│       │            with plan preserved                               │
-│       │                          │                                   │
-│  ─── task complete ──────────────┤                                   │
-│       │                          │                                   │
-│  stop-check.sh (Stop hook)       │                                   │
-│  (suggests /clear if <40%)       │                                   │
-│       │                          │                                   │
-│  ─── compaction ─────────────────┤                                   │
-│       │                          │                                   │
-│  precompact-handoff.sh           │                                   │
-│  (safety net — auto-generates    │                                   │
-│   handoff from transcript        │                                   │
-│   + git patch snapshot)          │                                   │
-│       │                          │                                   │
-│       ▼                          │                                   │
-│  ~/.remembrall/handoffs/{hash}/handoff-{session}.md                  │
-│  ~/.remembrall/patches/{hash}/patch-{session}.diff                   │
-│       │                          │                                   │
-│  session-resume.sh               │                                   │
-│  (SessionStart — injects         │                                   │
-│   handoff as additionalContext)   │                                   │
-│       │                          │                                   │
-│       ▼                          │                                   │
-│  Claude resumes with full context                                    │
-└──────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│                       Claude Code Session                           │
+│                                                                     │
+│  Status Line ──writes──> /tmp/claude-context-pct/{session_id}       │
+│       │                          │                                  │
+│       │                   context-monitor.sh                        │
+│       │                   (UserPromptSubmit)                        │
+│       │                          │                                  │
+│       │              ┌─── check Patrol signals                      │
+│       │              │    (handoff_trigger, context_alert)           │
+│       │              │                                              │
+│       │              bridge found? ──┐── no?                        │
+│       │                  │           │    │                         │
+│       │              use bridge   estimate from                     │
+│       │                  │        transcript size                   │
+│       │                  ▼           ▼                              │
+│       │            >65%? ── do nothing (silent)                      │
+│       │                  │                                          │
+│       │           <=65%? ── journal + Obliviate + Budget (default)   │
+│       │                  │  spawn: pensieve, obliviate, budget       │
+│       │                  │                                          │
+│       │           <=35%? ── warning + /handoff + plan mode           │
+│       │                  │                                          │
+│       │           <=30%? ── Time-Turner spawn (if enabled)           │
+│       │                  │                                          │
+│       │           <=25%? ── URGENT — immediate /handoff + plan mode  │
+│       │                  ▼                                          │
+│       │            Plan mode: "Yes, clear context"                   │
+│       │                  │                                          │
+│  precompact-handoff.sh   │  ← safety net auto-handoff               │
+│  + lineage-record.sh     │  ← session DAG tracking                  │
+│  + pensieve-distill.sh   │  ← distill session memory                │
+│       │                  │                                          │
+│  session-resume.sh       │  ← inject handoff + Pensieve memory      │
+│  + insights-aggregate.sh │  ← background pattern learning           │
+│  + patrol signal cleanup │  ← consume stale signals                 │
+│       ▼                  │                                          │
+│  Claude resumes with full context + session intelligence            │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
-## Five Layers of Protection
+## Eight Layers of Protection
 
-1. **Plan Mode Trigger** (`context-monitor.sh`) — Reads context % from a bridge file, or estimates it from transcript size as a fallback. At the warning threshold (default: 30%) remaining, tells Claude to run `/handoff` and then call `EnterPlanMode`. The `/handoff` skill captures task state, files, decisions, **and a prescriptive "Resume With" section** (which skill/methodology to invoke, active agents, MCP servers). The user sees the native "Yes, clear context" option — one click for a fresh start. At the urgent threshold (default: 20%), the same but with urgent priority. All thresholds are configurable via `threshold_journal`, `threshold_warning`, and `threshold_urgent` in config.
+1. **Pensieve Memory** (`pensieve-track.sh`) — Continuously tracks file operations, commands, and errors into structured JSONL. Survives compaction. Injected on every session resume.
 
-2. **Journal Checkpoint** (`context-monitor.sh` at configurable threshold, default 60%) — Before things get urgent, Remembrall nudges Claude to run `/handoff` to save progress. This early nudge ensures a handoff document exists before context gets critical, so if compaction strikes between the journal and warning thresholds, the handoff already reflects recent work.
+2. **Journal Checkpoint** (`context-monitor.sh` at 65%) — Early nudge to `/handoff`. Also spawns Obliviate staleness analysis and Budget category breakdown in background.
 
-3. **Safety Net** (`precompact-handoff.sh`) — If the early warning is missed and Claude auto-compacts, this hook extracts files touched, errors encountered, git operations, task state, and recent conversation from the transcript into a handoff document. Also captures git patches of session-touched files when git integration is enabled. Will not overwrite a higher-quality skill-generated handoff.
+3. **Warning Handoff** (`context-monitor.sh` at 35%) — Tells Claude to run `/handoff` and `EnterPlanMode`. Creates preemptive safety-net handoff in background.
 
-4. **Auto-Resume** (`session-resume.sh`) — On session start after compaction or `/clear`, injects the handoff content directly into Claude's context so it picks up where it left off.
+4. **Time-Turner** (`time-turner-spawn.sh` at 30%) — Spawns a parallel agent in a git worktree with remaining tasks. Works independently while main session compacts.
 
-5. **Stop Check** (`stop-check.sh`) — When Claude finishes a task, checks if context is below 40%. If a handoff already exists, suggests `/clear` + `/replay` before starting new work. If no handoff exists, tells Claude to run `/handoff` first.
+5. **Urgent Handoff** (`context-monitor.sh` at 25%) — Same as warning but with BLOCKING priority.
+
+6. **Safety Net** (`precompact-handoff.sh`) — If all nudges are missed and auto-compaction fires, extracts task state from the transcript. Also records the session in the lineage DAG and distills Pensieve data.
+
+7. **Auto-Resume** (`session-resume.sh`) — On session start after compaction or `/clear`, injects handoff + Pensieve memory. Spawns Insights aggregation in background. Cleans stale Patrol signals.
+
+8. **Stop Check** (`stop-check.sh`) — When Claude finishes a task at low context, suggests handoff or `/clear + /replay`.
 
 ---
 
@@ -154,29 +185,161 @@ Remembrall uses `~/.remembrall/config.json` for persistent settings. Run `/setup
   "autonomous_mode": false,
   "retention_hours": 72,
   "easter_eggs": true,
-  "threshold_journal": 60,
-  "threshold_warning": 30,
-  "threshold_urgent": 20,
-  "debug": false
+  "threshold_journal": 65,
+  "threshold_warning": 35,
+  "threshold_urgent": 25,
+  "debug": false,
+  "pensieve": true,
+  "pensieve_max_sessions": 3,
+  "pensieve_inject_budget": 2000,
+  "time_turner": false,
+  "time_turner_model": "sonnet",
+  "time_turner_max_budget_usd": 1.00,
+  "threshold_timeturner": 30,
+  "lineage": true,
+  "lineage_max_entries": 50,
+  "insights": true,
+  "insights_inject": false,
+  "insights_min_sessions": 3,
+  "obliviate": true,
+  "obliviate_stale_sessions": 5,
+  "budget_enabled": false,
+  "budget_code": 50,
+  "budget_conversation": 30,
+  "budget_memory": 20,
+  "patrol_integration": true,
+  "patrol_signal_ttl": 300
 }
 ```
+
+### Core Settings
 
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `git_integration` | `false` | Save git patches of session-touched files before handoff |
 | `team_handoffs` | `false` | Copy handoffs to project-local `.remembrall/handoffs/` |
-| `autonomous_mode` | `false` | Skip plan mode (no human click needed) — use `/handoff` + auto-compaction instead. Enable for overnight/unattended runs. |
+| `autonomous_mode` | `false` | Skip plan mode — use `/handoff` + auto-compaction instead |
 | `retention_hours` | `72` | Hours to keep handoff files before auto-cleanup |
-| `max_transcript_kb` | *(auto)* | Override max transcript size in KB. Rarely needed — bridge-derived calibration handles this automatically. |
-| `easter_eggs` | `true` | Show Harry Potter spell mappings in context nudges |
-| `disabled_hooks` | `[]` | Array of hook names to disable (e.g., `["stop-check"]`) |
-| `threshold_journal` | `60` | Context % that triggers the first "run /handoff" nudge |
-| `threshold_warning` | `30` | Context % that triggers the "run /handoff + plan mode" nudge |
-| `threshold_urgent` | `20` | Context % that triggers the "IMMEDIATELY" nudge |
+| `max_transcript_kb` | *(auto)* | Override max transcript size in KB |
+| `easter_eggs` | `true` | Harry Potter spell mappings in context nudges |
+| `disabled_hooks` | `[]` | Array of hook names to disable |
 | `recency_window` | `60` | Seconds to look back when matching handoffs to sessions |
-| `debug` | `false` | Enable debug logging to `~/.remembrall/debug.log` |
+| `debug` | `false` | Debug logging to `~/.remembrall/debug.log` |
 
-Settings apply globally — once configured, all Claude sessions respect them. Values are stored as native JSON types (booleans, numbers).
+### Threshold Settings
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `threshold_journal` | `65` | Context % that triggers first "run /handoff" nudge |
+| `threshold_warning` | `35` | Context % that triggers "run /handoff + plan mode" |
+| `threshold_urgent` | `25` | Context % that triggers "IMMEDIATELY" nudge |
+| `threshold_timeturner` | `30` | Context % that triggers Time-Turner spawn |
+
+### Pensieve Settings
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `pensieve` | `true` | Enable Pensieve session memory tracking |
+| `pensieve_max_sessions` | `3` | Number of recent sessions to keep in Pensieve |
+| `pensieve_inject_budget` | `2000` | Max characters to inject from Pensieve on resume |
+
+### Time-Turner Settings
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `time_turner` | `false` | Enable parallel agent spawning at low context |
+| `time_turner_model` | `"sonnet"` | Model for Time-Turner agents |
+| `time_turner_max_budget_usd` | `1.00` | Max budget in USD per Time-Turner agent |
+
+### Session Lineage Settings
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `lineage` | `true` | Track session ancestry in a DAG |
+| `lineage_max_entries` | `50` | Max sessions to keep in the lineage index |
+
+### Insights Settings
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `insights` | `true` | Enable ambient learning from Pensieve data |
+| `insights_inject` | `false` | Inject insights into session context |
+| `insights_min_sessions` | `3` | Min sessions before generating insights |
+
+### Obliviate Settings
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `obliviate` | `true` | Enable memory staleness analysis |
+| `obliviate_stale_sessions` | `5` | Sessions without reference before marking stale |
+
+### Budget Settings
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `budget_enabled` | `false` | Enable context budget allocation tracking |
+| `budget_code` | `50` | Target % for code (tool_use/tool_result) |
+| `budget_conversation` | `30` | Target % for conversation text |
+| `budget_memory` | `20` | Target % for memory/system content |
+
+### Patrol Integration Settings
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `patrol_integration` | `true` | Enable Patrol signal protocol |
+| `patrol_signal_ttl` | `300` | Seconds before Patrol signals expire |
+
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `/setup-remembrall` | Manual fallback for bridge setup and config customization |
+| `/remembrall-status` | Diagnostic: check context %, bridge, Pensieve, Lineage, Insights, Budget, Patrol |
+| `/remembrall-help` | List all commands, skills, and config options |
+| `/autonomous` | Toggle autonomous mode on/off for overnight runs |
+| `/remembrall-uninstall` | Clean removal: bridge, data, temp files (supports `--dry-run`) |
+| `/map` | Visual session overview — files, commands, errors, burn rate, Time-Turner |
+| `/lineage` | Session ancestry DAG — parents, children, branches, Time-Turner merges |
+| `/insights` | Project insights — file hotspots, workflow patterns, error recurrence |
+| `/obliviate` | Review and archive stale memories |
+| `/budget` | Context budget allocation breakdown |
+
+## Skills
+
+| Skill | Description |
+|-------|-------------|
+| `/handoff` | Create a structured handoff document with frontmatter, session state, Pensieve data, and git patches |
+| `/replay` | Smart replay — verifies git state, checks expected files, restores patches |
+| `/timeturner` | Manage Time-Turner agents — `status`, `diff`, `merge`, `cancel` |
+| `/pensieve` | Browse and search Pensieve session memories |
+| `/obliviate` | Guided memory pruning with user confirmation |
+
+## Storage
+
+```
+~/.remembrall/
+  config.json                                         # global settings
+  calibration.json                                    # auto-calibration data
+  debug.log                                           # debug log (when enabled)
+  handoffs/{project-name}-{hash8}/
+    handoff-{session_id}.md                           # personal handoffs
+  patches/{project-name}-{hash8}/
+    patch-{session_id}.diff                           # git patch snapshots
+  pensieve/{project-name}-{hash8}/
+    {session_id}.jsonl                                # raw session tracking
+    session-{session_id}.json                         # distilled summaries
+  lineage/{project-name}-{hash8}/
+    index.json                                        # session DAG
+  insights/{project-name}-{hash8}/
+    insights.json                                     # aggregated patterns
+
+/tmp/remembrall-*/                                    # ephemeral session data
+  /tmp/remembrall-nudges/{session_id}                 # nudge state
+  /tmp/remembrall-obliviate/{session_id}.json         # staleness analysis
+  /tmp/remembrall-budget/{session_id}.json            # budget analysis
+  /tmp/remembrall-signals/{session_id}/               # Patrol signal files
+  /tmp/remembrall-timeturner/{session_id}/            # Time-Turner state
+```
 
 ## Self-Calibrating Context Estimation
 
@@ -184,21 +347,56 @@ Remembrall uses a two-branch estimation strategy:
 
 **When the bridge is active** (most accurate):
 
-The status-line bridge writes Claude's actual context remaining % to `/tmp/claude-context-pct/{session_id}`. Auto-configured on first session. As a side effect, Remembrall derives `content_max` (how many content bytes fit before context runs out) from the equation: `content_max = content_bytes / (used_pct / 100)`. This auto-calibrates per user, per model — accounting for your specific overhead (plugins, skills, system prompt size). Calibration samples are stored once context usage reaches 20%.
+The status-line bridge writes Claude's actual context remaining % to `/tmp/claude-context-pct/{session_id}`. Auto-configured on first session. As a side effect, Remembrall derives `content_max` (how many content bytes fit before context runs out) from the equation: `content_max = content_bytes / (used_pct / 100)`. This auto-calibrates per user, per model. Calibration samples are stored once context usage reaches 20%.
 
 **When the bridge is unavailable** (fallback):
 
-1. **Structural JSONL parser** — Parses transcript content bytes and compares against the bridge-derived `content_max` (if calibrated) or model-specific defaults. Accurate when calibration data exists from prior bridge sessions.
+1. **Structural JSONL parser** — Parses transcript content bytes and compares against the bridge-derived `content_max` (if calibrated) or model-specific defaults.
 
 2. **File-size fallback** — Last resort when structural parsing fails. Uses raw transcript size against calibrated or model-specific maximums.
 
-Calibration data is stored at `~/.remembrall/calibration.json` and persists across sessions. If you want to reset calibration (e.g., after changing models), delete this file.
+Calibration data is stored at `~/.remembrall/calibration.json` and persists across sessions.
+
+## Time-Turner Integration
+
+All features work seamlessly with Time-Turner parallel agents:
+
+- **Pensieve**: TT sessions contribute to file hotspots, workflow patterns, and error recurrence
+- **Session Lineage**: TT branches appear in the DAG with `type: "time-turner"`. Merged agents get `status: "merged"`
+- **Obliviate**: Runs in main session only. Considers TT session activity when evaluating staleness
+- **Context Budget**: Each session (main or TT) tracks its own budget independently
+- **Patrol Integration**: Signals route to main session only. TT agents continue independently
+
+### Cost Reduction
+
+These features make Time-Turner cheaper:
+
+1. **Obliviate** prunes stale memories BEFORE TT agents spawn — leaner context, fewer wasted tokens
+2. **Context Budget** keeps the main session within allocation — delays hitting the TT threshold
+3. **Insights** feed targeted tasks to TT agents instead of "continue remaining work"
+4. **Session Lineage** tracks which TT branches were productive vs wasteful — data for smarter spawning decisions
+5. **Patrol** can suppress TT spawn via `context_alert` signal with `skip_timeturner: true`
+
+## Patrol Integration Protocol
+
+Remembrall and [Patrol](https://github.com/cukas/patrol) communicate via file-based signals in `/tmp/remembrall-signals/{session_id}/`. Patrol is fully optional.
+
+**Signal types:**
+
+| Signal | Direction | Description |
+|--------|-----------|-------------|
+| `handoff_trigger` | Patrol → Remembrall | Request immediate handoff |
+| `context_alert` | Patrol → Remembrall | Advisory message, optional `skip_timeturner` flag |
+
+Patrol writes `{signal_type}.json` → Remembrall reads payload + deletes file. Signals expire after `patrol_signal_ttl` seconds (default 300).
+
+See `docs/patrol-integration.md` for the full protocol spec.
 
 ## Git Integration
 
-When enabled, Remembrall captures git patches of your session's uncommitted changes before handoff. Only files touched by Claude during the session are included — your other work is untouched.
+When enabled, Remembrall captures git patches of your session's uncommitted changes before handoff. Only files touched by Claude during the session are included.
 
-- Patches stored at: `~/.remembrall/patches/{project_hash}/patch-{session}.diff`
+- Patches stored at: `~/.remembrall/patches/{project-hash}/patch-{session}.diff`
 - Your repo stays clean — no WIP commits, no stashes
 - On `/replay`, patches are verified and offered for restore
 - If HEAD moved since handoff, you're warned before applying
@@ -206,10 +404,6 @@ When enabled, Remembrall captures git patches of your session's uncommitted chan
 ## Team Handoffs
 
 When enabled, handoffs are also saved in your project directory at `.remembrall/handoffs/`. Another team member's Claude session can pick up where yours left off.
-
-- Personal handoffs are checked first, then team directory
-- Consider adding `.remembrall/` to `.gitignore` unless you want handoffs committed
-- Each team member's handoff files coexist (per-session naming)
 
 ## Requirements
 
@@ -224,105 +418,8 @@ When enabled, handoffs are also saved in your project directory at `.remembrall/
 |----------|--------|
 | macOS | Fully supported (`md5`, `stat -f`) |
 | Linux | Fully supported (`md5sum`, `stat -c`) |
-| WSL (Windows Subsystem for Linux) | Fully supported (uses Linux userspace) |
+| WSL | Fully supported (uses Linux userspace) |
 | Windows (native) | Not supported — use WSL |
-
-After cloning, ensure hook scripts are executable:
-
-```bash
-chmod +x hooks/*.sh scripts/*.sh
-```
-
-## Commands
-
-| Command | Description |
-|---------|-------------|
-| `/setup-remembrall` | Manual fallback for bridge setup and config customization |
-| `/remembrall-status` | Diagnostic: check context %, bridge, handoffs |
-| `/remembrall-help` | List all commands, skills, and config options |
-| `/autonomous` | Toggle autonomous mode on/off for overnight runs |
-| `/remembrall-uninstall` | Clean removal: removes bridge, data, and temp files (supports `--dry-run`) |
-
-## Skills
-
-| Skill | Description |
-|-------|-------------|
-| `/handoff` | Create a structured handoff document with YAML frontmatter, session state, and git patches (when enabled) |
-| `/replay` | Smart replay — verifies git state, checks expected files, and offers git patch restore from previous session |
-
-## Storage
-
-Handoff files and patches are stored per-project:
-
-```
-~/.remembrall/
-  config.json                                          # global settings
-  calibration.json                                     # auto-calibration data
-  handoffs/{md5_of_cwd}/handoff-{session_id}.md        # personal handoffs
-  patches/{md5_of_cwd}/patch-{session_id}.diff         # git patch snapshots
-
-.remembrall/
-  handoffs/handoff-{session_id}.md                     # team handoffs (project-local)
-```
-
-- Each session gets its own file — multiple Claude instances can coexist
-- Handoffs older than the configured retention period (default: 72 hours) are auto-cleaned
-- Consumed handoffs are renamed to `.consumed.md` and auto-cleaned after 1 hour
-- Handoffs include `format_version: 2` in frontmatter for forward compatibility
-
-## Debug Logging
-
-Enable debug logging to troubleshoot hook behavior:
-
-```bash
-# Via config (persistent)
-remembrall_config_set "debug" "true"
-
-# Via environment (one-off)
-REMEMBRALL_DEBUG=1 claude
-```
-
-Logs are written to `~/.remembrall/debug.log` with ISO timestamps and hook names. The log is auto-rotated at 1MB. Each hook identifies itself in log entries (e.g., `[context-monitor]`, `[session-resume]`).
-
-## Example Use Cases
-
-### Long refactors that outlast a single context
-
-You're renaming a module across 40 files. Halfway through, context hits 30%. Remembrall tells Claude to run `/handoff` and enter plan mode. You see "Yes, clear context" — one click, and Claude continues at file 21 with a fresh context and the handoff preserved. No manual steps.
-
-### Multi-day feature builds
-
-You're building an auth system over several sessions. Each time you stop for the day, `/handoff` saves your progress: completed routes, pending middleware, the JWT-vs-session decision and why. Next morning, `/replay` — Claude knows exactly where you left off.
-
-### Pair-programming handoffs between terminals
-
-You have two Claude instances open — one for frontend, one for backend. The backend session runs low on context. It writes a handoff. With team handoffs enabled, the handoff is also saved in the project directory. You open a fresh terminal, `/replay`, and the new session continues the API work while the frontend session keeps running undisturbed (separate handoff files, no conflicts). Another team member can even pick up the handoff from the shared project directory.
-
-### Unexpected compaction recovery
-
-You're deep in a debugging session and didn't notice context getting low. Claude auto-compacts. Without remembrall, you'd lose all the debugging context — which files you checked, what theories you ruled out, what the error trace showed. With remembrall, the safety net hook fires just before compaction, extracts the key info from the transcript, and injects it into the compacted session automatically.
-
-### Code reviews and large PRs
-
-You're reviewing a 500-line PR file by file. Context fills up with diff content. At 30%, Remembrall triggers — Claude runs `/handoff` to capture reviewed files, issues found, and what's left, then enters plan mode. Pick "clear context" and continue reviewing from where you left off.
-
-### Teaching and onboarding
-
-You're walking Claude through a complex codebase architecture so it can help new team members. The explanation fills context. `/handoff` preserves the architectural understanding — component relationships, data flow patterns, naming conventions — so any future session can build on it instead of re-explaining from scratch.
-
-## How It Differs from Project-Specific Setups
-
-| Aspect | Project-specific | Remembrall (plugin) |
-|--------|-----------------|---------------------|
-| Storage | Project memory dir | `~/.remembrall/handoffs/{hash}/` |
-| Git patches | Manual stash/commit | `~/.remembrall/patches/{hash}/` (automatic) |
-| Team sharing | Not supported | `.remembrall/handoffs/` in project dir |
-| Config | Per-project | `~/.remembrall/config.json` (global) |
-| Hash | macOS-only `md5` | Cross-platform (md5/md5sum) |
-| Hook paths | Absolute paths in settings | `${CLAUDE_PLUGIN_ROOT}/hooks/` |
-| CWD | Hardcoded fallback | Dynamic from hook input |
-| Nudge dir | `/tmp/claude-context-nudges/` | `/tmp/remembrall-nudges/` |
-| SessionStart | Bare `additionalContext` | `hookSpecificOutput` format |
 
 ## Troubleshooting
 
@@ -332,33 +429,42 @@ You're walking Claude through a complex codebase architecture so it can help new
 
 **Bridge not injecting** — Check if the bridge snippet is present: `grep -q "claude-context-pct" ~/.claude/settings.json && echo OK || echo MISSING`. If missing, restart your session or run `/setup-remembrall`.
 
-**Handoff not consumed on resume** — Run `/remembrall-status` and look for `.claimed-*` or `.consumed` files. Claimed files older than 5 minutes are cleaned up automatically.
+**Handoff not consumed on resume** — Run `/remembrall-status` and look for `.claimed-*` or `.consumed` files.
 
-**Stale calibration after model switch** — Delete `~/.remembrall/calibration.json` and let Remembrall recalibrate from the new model's bridge data.
+**Stale calibration after model switch** — Delete `~/.remembrall/calibration.json`.
 
-**Hooks don't seem to be running** — Ensure scripts are executable: `chmod +x hooks/*.sh scripts/*.sh`. Verify `jq --version` returns a version. Check that the plugin is installed: `claude plugin list`. Enable debug logging (`remembrall_config_set "debug" "true"`) and check `~/.remembrall/debug.log` for hook activity.
+**Hooks don't seem to be running** — Ensure scripts are executable: `chmod +x hooks/*.sh scripts/*.sh`. Enable debug logging and check `~/.remembrall/debug.log`.
 
-**Bridge file is empty/missing** — The bridge file is written on each Claude response cycle. After `/clear` or compaction, it's intentionally deleted and recreated on the next response. If persistently missing, restart your session.
+**Time-Turner agent not spawning** — Ensure `time_turner: true` is set in config. Check that `claude` CLI is on PATH and git worktrees are supported in your repo.
 
-**Another plugin owns the status line** — If Remembrall detects an existing `statusLine.command` that doesn't reference context variables, it appends the bridge cautiously and logs a warning. Check the debug log for details.
+**Pensieve not injecting** — Check `pensieve: true` in config. Run `/remembrall-status` to see Pensieve data directory and session count.
+
+**Insights not generating** — Need at least `insights_min_sessions` (default 3) Pensieve sessions. Insights aggregate on SessionStart — start a new session to trigger.
+
+**Obliviate shows no stale memories** — Memories must be older than `obliviate_stale_sessions * 2` hours (default 10h). Recent Pensieve references reduce staleness.
 
 ## FAQ
 
-**Does Remembrall bloat my context?** No. It injects one handoff document on session resume (then deletes it). During a session, nudges are short one-line messages injected via `additionalContext` — each fires at most once per threshold (configurable, defaults: 60%, 30%, 20%), so the total overhead is minimal. There is no accumulated memory that grows over time.
+**Does Remembrall bloat my context?** No. Nudges are short one-line messages. Pensieve injection is capped at `pensieve_inject_budget` characters (default 2000). There is no accumulated memory that grows over time.
+
+**Is the Time-Turner safe?** Yes. It's opt-in, budget-capped, worktree-isolated, and never auto-merges. You review changes via `/timeturner diff` before merging.
+
+**What does Obliviate actually delete?** Nothing — it archives. Stale memories are moved to `.archive/` in the memory directory. You can restore them manually.
+
+**Can I use Remembrall without Patrol?** Yes. Patrol integration is purely additive. With Patrol not installed, the signal check returns empty and has zero overhead.
 
 **Are there any easter eggs?** Maybe. Try speaking to Claude in the language of wizards when the Remembrall starts glowing. 🔮
 
 ## Privacy
 
-Remembrall is fully local. It does not collect, transmit, or store any data outside your machine.
+Remembrall is fully local. No network requests, no analytics, no telemetry. All data stays on your machine:
 
-- Handoff files are stored in `~/.remembrall/handoffs/` on your local filesystem
-- Git patches are stored locally in `~/.remembrall/patches/`
-- Team handoffs are stored in your project directory at `.remembrall/handoffs/`
-- Temporary bridge files live in `/tmp/` and are cleared on reboot
-- No network requests, no analytics, no telemetry
-- No external services or APIs are contacted
-- All processing happens in local shell scripts
+- Handoffs: `~/.remembrall/handoffs/`
+- Patches: `~/.remembrall/patches/`
+- Pensieve: `~/.remembrall/pensieve/`
+- Lineage: `~/.remembrall/lineage/`
+- Insights: `~/.remembrall/insights/`
+- Temp files: `/tmp/remembrall-*/` (cleared on reboot)
 
 ## License
 
