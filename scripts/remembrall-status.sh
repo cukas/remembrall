@@ -8,7 +8,7 @@ remembrall_require_jq
 
 CWD="${1:-$(pwd)}"
 
-HANDOFF_DIR=$(remembrall_handoff_dir "$CWD") || { echo "Error: no md5 or md5sum found"; exit 1; }
+HANDOFF_DIR=$(remembrall_handoff_dir "$CWD") || { echo "Error: could not compute handoff directory"; exit 1; }
 
 echo "Remembrall Status"
 echo "─────────────────"
@@ -99,7 +99,7 @@ else
 fi
 
 # Autonomous mode
-AUTO_MODE=$(remembrall_config "autonomous_mode" "false")
+AUTO_MODE=$(remembrall_config "autonomous_mode" "true")
 echo "Auto:     $AUTO_MODE"
 
 # Calibration
@@ -116,19 +116,110 @@ else
   echo "Calibr:   Not calibrated (using default 256KB)"
 fi
 
-# Team handoffs
-TEAM_DIR="$CWD/.remembrall/handoffs"
+# Pensieve
+PENSIEVE_DIR=$(remembrall_pensieve_dir "$CWD" 2>/dev/null) || PENSIEVE_DIR=""
+if [ -n "$PENSIEVE_DIR" ] && [ -d "$PENSIEVE_DIR" ]; then
+  P_COUNT=0
+  for f in "$PENSIEVE_DIR"/session-*.json; do [ -f "$f" ] && P_COUNT=$((P_COUNT + 1)); done
+  echo "Pensieve: $P_COUNT saved session(s)"
+else
+  echo "Pensieve: No saved sessions"
+fi
+
+# Pensieve tracking (current session)
+PENSIEVE_TMP=$(remembrall_pensieve_tmp)
+if [ -n "$SESSION_ID" ] && [ -f "$PENSIEVE_TMP/${SESSION_ID}.jsonl" ]; then
+  ENTRY_COUNT=$(wc -l < "$PENSIEVE_TMP/${SESSION_ID}.jsonl" 2>/dev/null | tr -d ' ')
+  echo "Tracking: $ENTRY_COUNT entries this session"
+else
+  echo "Tracking: No entries yet"
+fi
+
+# Time-Turner
+TT_STATUS=$("$SCRIPT_DIR/../hooks/time-turner-check.sh" "$CWD" 2>/dev/null) || TT_STATUS=""
+if [ -n "$TT_STATUS" ]; then
+  echo "Turner:   $TT_STATUS"
+else
+  echo "Turner:   Not active"
+fi
+
+# Lineage
+LINEAGE_DIR=$(remembrall_lineage_dir "$CWD" 2>/dev/null) || LINEAGE_DIR=""
+if [ -n "$LINEAGE_DIR" ] && [ -f "$LINEAGE_DIR/index.json" ]; then
+  L_COUNT=$(jq '.sessions | length' "$LINEAGE_DIR/index.json" 2>/dev/null) || L_COUNT=0
+  L_BRANCHES=$(remembrall_lineage_branches "$CWD" 2>/dev/null) || L_BRANCHES=0
+  echo "Lineage:  $L_COUNT session(s), $L_BRANCHES branch point(s)"
+else
+  echo "Lineage:  No data yet"
+fi
+
+# Insights
+INSIGHTS_DIR=$(remembrall_insights_dir "$CWD" 2>/dev/null) || INSIGHTS_DIR=""
+if [ -n "$INSIGHTS_DIR" ] && [ -f "$INSIGHTS_DIR/insights.json" ]; then
+  I_SESSIONS=$(jq -r '.sessions_analyzed // 0' "$INSIGHTS_DIR/insights.json" 2>/dev/null)
+  I_HOTSPOTS=$(jq '.file_hotspots | length' "$INSIGHTS_DIR/insights.json" 2>/dev/null) || I_HOTSPOTS=0
+  echo "Insights: $I_SESSIONS sessions analyzed, $I_HOTSPOTS hotspot(s)"
+else
+  echo "Insights: Not yet aggregated"
+fi
+
+# Obliviate
+OBLIVIATE_DIR=$(remembrall_obliviate_dir)
+if [ -n "$SESSION_ID" ] && [ -f "$OBLIVIATE_DIR/${SESSION_ID}.json" ]; then
+  O_STALE=$(jq -r '.stale_count // 0' "$OBLIVIATE_DIR/${SESSION_ID}.json" 2>/dev/null) || O_STALE=0
+  echo "Obliviate: $O_STALE stale memory/ies detected"
+else
+  echo "Obliviate: Not analyzed yet"
+fi
+
+# Budget
+BUDGET_DIR=$(remembrall_budget_dir)
+if [ -n "$SESSION_ID" ] && [ -f "$BUDGET_DIR/${SESSION_ID}.json" ]; then
+  B_CODE=$(jq -r '.code_pct // 0' "$BUDGET_DIR/${SESSION_ID}.json" 2>/dev/null)
+  B_CONV=$(jq -r '.conversation_pct // 0' "$BUDGET_DIR/${SESSION_ID}.json" 2>/dev/null)
+  B_MEM=$(jq -r '.memory_pct // 0' "$BUDGET_DIR/${SESSION_ID}.json" 2>/dev/null)
+  echo "Budget:   code=${B_CODE}% conv=${B_CONV}% mem=${B_MEM}%"
+else
+  BUDGET_ENABLED=$(remembrall_config "budget_enabled" "false")
+  if [ "$BUDGET_ENABLED" = "true" ]; then
+    echo "Budget:   Not analyzed yet"
+  else
+    echo "Budget:   Disabled (opt-in: budget_enabled=true)"
+  fi
+fi
+
+# Patrol
+PATROL_STATUS="not detected"
+if remembrall_patrol_detected 2>/dev/null; then
+  PATROL_STATUS="connected"
+fi
+PATROL_ENABLED=$(remembrall_config "patrol_integration" "true")
+if [ "$PATROL_ENABLED" = "true" ]; then
+  EASTER_EGGS=$(remembrall_config "easter_eggs" "true")
+  if [ "$EASTER_EGGS" = "true" ]; then
+    echo "Patrol:   Ministry of Magic: Patrol ($PATROL_STATUS)"
+  else
+    echo "Patrol:   $PATROL_STATUS (integration enabled)"
+  fi
+else
+  echo "Patrol:   Integration disabled"
+fi
+
+# Team handoffs (centralized — same dir as personal, distinguished by metadata)
+TEAM_DIR=$(remembrall_team_handoff_dir "$CWD")
 if [ -d "$TEAM_DIR" ]; then
   TEAM_COUNT=0
-  for f in "$TEAM_DIR"/handoff-*.md; do [ -f "$f" ] && TEAM_COUNT=$((TEAM_COUNT + 1)); done
+  for f in "$TEAM_DIR"/handoff-*.md; do
+    [ -f "$f" ] || continue
+    # Count only team-flagged handoffs
+    _team_flag=$(remembrall_frontmatter_get "$f" "team" 2>/dev/null)
+    [ "$_team_flag" = "true" ] && TEAM_COUNT=$((TEAM_COUNT + 1))
+  done
   if [ "$TEAM_COUNT" -gt 0 ]; then
     echo "Team:     $TEAM_COUNT handoff(s)"
-    for f in "$TEAM_DIR"/handoff-*.md; do
-      [ -f "$f" ] && echo "          $f"
-    done
   else
     echo "Team:     No team handoffs"
   fi
 else
-  echo "Team:     No team handoffs directory"
+  echo "Team:     No team handoffs"
 fi

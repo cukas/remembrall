@@ -48,9 +48,9 @@ fi
 # Check if a handoff already exists for this session
 HANDOFF_EXISTS=false
 if [ -n "$SESSION_ID" ] && [ -n "$CWD" ]; then
-  HASH=$(remembrall_md5 "$CWD") || true
-  if [ -n "$HASH" ]; then
-    HANDOFF_FILE="$HOME/.remembrall/handoffs/$HASH/handoff-${SESSION_ID}.md"
+  HOFF_DIR=$(remembrall_handoff_dir "$CWD") || true
+  if [ -n "$HOFF_DIR" ]; then
+    HANDOFF_FILE="$HOFF_DIR/handoff-${SESSION_ID}.md"
     if [ -f "$HANDOFF_FILE" ]; then
       HANDOFF_EXISTS=true
     fi
@@ -60,7 +60,7 @@ fi
 if [ "$HANDOFF_EXISTS" = true ]; then
   # Handoff exists — just suggest /clear + /replay via stderr (ANSI OK here)
   GAUGE=$(remembrall_gauge "$REMAINING")
-  echo "Remembrall: ${GAUGE} remaining${ESTIMATED}. Handoff saved. Consider /clear + /replay before new work." >&2
+  echo "Remembrall: ${GAUGE} remaining${ESTIMATED}. Handoff saved. Session will auto-resume after context clears." >&2
 else
   # No handoff — block stop and ask user to save handoff first
   cat << EOF

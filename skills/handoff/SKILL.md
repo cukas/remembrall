@@ -67,10 +67,10 @@ Create a structured handoff document that any Claude instance can read to resume
 
    **Replace the placeholder content** with actual information from this session. Replace the `--files` and `--tasks` arguments with real values.
 
-3. **Confirm to the user** — Tell them the handoff is saved and they can `/clear` or switch to another Claude instance. Show:
-   - Brief summary of what was captured
-   - The output path from the script (printed to stdout)
-   - Whether team handoffs are enabled (check `remembrall_config "team_handoffs"` — if `true`, a team copy was also saved to `.remembrall/handoffs/` in the project directory)
+3. **Confirm and continue** — Then:
+   - **Autopilot mode** (REMEMBRALL autonomous flag is active, or AUTONOMOUS MODE was mentioned in a recent nudge): Do NOT enter plan mode. Do NOT ask the user anything. Just say "Handoff saved" in one line and **keep working on the next task**. The handoff is a safety net — compaction will happen naturally and the session-resume hook will auto-inject it. This is the autopilot loop: save → keep working → compaction → auto-resume → keep working.
+   - **Attended mode, context is low** (triggered by REMEMBRALL_WARN or REMEMBRALL_URGENT): call `EnterPlanMode` immediately. The session-resume hook will auto-inject the handoff after context clears. Do NOT tell the user to type `/clear` or `/replay`.
+   - **Manual invocation** (context is fine): just confirm with a brief summary and continue working.
 
 ## Rules
 - Be concise but complete — the next instance has zero context

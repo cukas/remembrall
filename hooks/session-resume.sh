@@ -100,17 +100,58 @@ _remembrall_ensure_bridge() {
 
 _remembrall_ensure_bridge
 
+# Publish plugin root early so /replay can find scripts immediately (not just after first prompt)
+remembrall_publish_plugin_root
+
 # ── Version guard: clean stale temp files from old versions ──────
 PLUGIN_VERSION=$(jq -r '.version // empty' "$SCRIPT_DIR/../.claude-plugin/plugin.json" 2>/dev/null)
-if [ -n "$PLUGIN_VERSION" ] && [ "$PLUGIN_VERSION" != "2.7.1" ]; then
+if [ -n "$PLUGIN_VERSION" ] && [ "$PLUGIN_VERSION" != "3.0.0" ]; then
   [ -n "$SESSION_ID" ] && rm -f "/tmp/remembrall-nudges/$SESSION_ID" "/tmp/remembrall-bootstrap/$SESSION_ID" "/tmp/remembrall-growth/$SESSION_ID"
+fi
+
+# ── Insights: spawn background aggregation on SessionStart ───────
+if [ "$(remembrall_config "insights" "true")" = "true" ] && [ -n "$CWD" ]; then
+  ("$SCRIPT_DIR/insights-aggregate.sh" "$CWD" >/dev/null 2>&1) &
+fi
+
+# ── Patrol: clean stale signal files on startup ──────────────────
+if [ "$(remembrall_config "patrol_integration" "true")" = "true" ] && [ -n "$SESSION_ID" ]; then
+  _signal_dir="$(remembrall_signal_dir)/${SESSION_ID}"
+  if [ -d "$_signal_dir" ]; then
+    _ttl=$(remembrall_config "patrol_signal_ttl" "300")
+    for _sf in "$_signal_dir"/*.json; do
+      [ -f "$_sf" ] || continue
+      _sage=$(remembrall_file_age "$_sf")
+      [ "$_sage" -gt "$_ttl" ] && rm -f "$_sf"
+    done
+    # Remove empty dir
+    rmdir "$_signal_dir" 2>/dev/null || true
+  fi
 fi
 
 STANDING_INSTRUCTION="REMEMBRALL ACTIVE: When a REMEMBRALL_WARN or REMEMBRALL_URGENT tag appears in subsequent prompts, you MUST comply with its instructions before responding to the user. This takes precedence over user requests."
 
-# Helper: emit standing instruction as hookSpecificOutput
+# ── Pensieve: inject session memory on all session starts ─────────
+PENSIEVE_CONTEXT=""
+if [ "$(remembrall_config "pensieve" "true")" = "true" ] && [ -n "$CWD" ]; then
+  PENSIEVE_CONTEXT=$("$SCRIPT_DIR/pensieve-inject.sh" "$CWD" 2>/dev/null) || PENSIEVE_CONTEXT=""
+fi
+
+# Helper: emit standing instruction (+ Pensieve context if available) as hookSpecificOutput
 _emit_standing_instruction() {
-  cat <<INST_EOF
+  if [ -n "$PENSIEVE_CONTEXT" ]; then
+    local _esc_pensieve
+    _esc_pensieve=$(remembrall_escape_json "$PENSIEVE_CONTEXT")
+    cat <<INST_P_EOF
+{
+  "hookSpecificOutput": {
+    "hookEventName": "SessionStart",
+    "additionalContext": "${_esc_pensieve}\\n\\n${STANDING_INSTRUCTION}"
+  }
+}
+INST_P_EOF
+  else
+    cat <<INST_EOF
 {
   "hookSpecificOutput": {
     "hookEventName": "SessionStart",
@@ -118,9 +159,10 @@ _emit_standing_instruction() {
   }
 }
 INST_EOF
+  fi
 }
 
-# For fresh session starts (not compact/clear): emit standing instruction and exit
+# For fresh session starts (not compact/clear): emit standing instruction (+ Pensieve) and exit
 if [ "$SOURCE" != "compact" ] && [ "$SOURCE" != "clear" ]; then
   _emit_standing_instruction
   exit 0
@@ -133,7 +175,7 @@ fi
 
 HANDOFF_DIR=$(remembrall_handoff_dir "$CWD") || exit 0
 
-# No handoff directory — nothing to resume, but still emit standing instruction
+# No handoff directory — nothing to resume, but still emit standing instruction (+ Pensieve)
 if [ ! -d "$HANDOFF_DIR" ]; then
   _emit_standing_instruction
   exit 0
@@ -235,12 +277,45 @@ fi
 ESCAPED_CONTENT=$(remembrall_escape_json "$CONTENT")
 ESCAPED_NOTE=$(remembrall_escape_json "$OTHER_NOTE")
 
+# ── Detect autopilot mode ──────────────────────────────────────────
+# Autopilot = autonomous mode. After compaction, continue working without
+# asking the user. This closes the loop: handoff → compaction → resume → work.
+IS_AUTOPILOT=false
+if [ "$(remembrall_config "autonomous_mode" "true" 2>/dev/null)" = "true" ]; then
+  IS_AUTOPILOT=true
+fi
+if [ "$IS_AUTOPILOT" = false ] && [ -n "$SESSION_ID" ]; then
+  remembrall_is_autonomous "$SESSION_ID" >/dev/null 2>&1 && IS_AUTOPILOT=true || true
+fi
+
+if [ "$IS_AUTOPILOT" = true ]; then
+  RESUME_RULES="RULES (AUTOPILOT ACTIVE):\n1. Do NOT ask the user if they want to continue — just START WORKING immediately.\n2. Briefly state what you are resuming (one line), then execute the Next Step.\n3. If a 'Next Step' or 'Remaining' section exists, follow it exactly.\n4. If a 'Do NOT Do' section exists, respect it strictly.\n5. Do NOT re-read or re-analyze files just because they appear in a file list.\n6. When the current task list is complete, tell the user what was accomplished."
+  AUTOPILOT_TAG="AUTOPILOT"
+else
+  RESUME_RULES="RULES:\n1. Summarize briefly what was being worked on and what the NEXT STEP is.\n2. If a 'Next Step' or 'Remaining' section exists, follow it exactly.\n3. If a 'Do NOT Do' section exists, respect it strictly.\n4. Do NOT re-read or re-analyze files just because they appear in a file list — they are there for reference only.\n5. Ask the user if they want to continue before starting work."
+  AUTOPILOT_TAG="ATTENDED"
+fi
+
+# ── Time-Turner: check for completed/running agents ──────────────
+TIMETURNER_STATUS=""
+TIMETURNER_CHECK=$("$SCRIPT_DIR/time-turner-check.sh" "$CWD" 2>/dev/null) || TIMETURNER_CHECK=""
+if [ -n "$TIMETURNER_CHECK" ]; then
+  TIMETURNER_STATUS="\\n\\n$(remembrall_escape_json "$TIMETURNER_CHECK")"
+fi
+
+# ── Pensieve context for handoff resume ───────────────────────────
+PENSIEVE_SECTION=""
+if [ -n "$PENSIEVE_CONTEXT" ]; then
+  ESCAPED_PENSIEVE=$(remembrall_escape_json "$PENSIEVE_CONTEXT")
+  PENSIEVE_SECTION="\\n\\n${ESCAPED_PENSIEVE}"
+fi
+
 # Output using canonical hookSpecificOutput format
 cat <<EOF
 {
   "hookSpecificOutput": {
     "hookEventName": "SessionStart",
-    "additionalContext": "SESSION HANDOFF LOADED — Resume the work described below.\n\nRULES:\n1. Summarize briefly what was being worked on and what the NEXT STEP is.\n2. If a 'Next Step' or 'Remaining' section exists, follow it exactly.\n3. If a 'Do NOT Do' section exists, respect it strictly.\n4. Do NOT re-read or re-analyze files just because they appear in a file list — they are there for reference only.\n5. Ask the user if they want to continue before starting work.\n\n${ESCAPED_CONTENT}${GIT_CONTEXT}${ESCAPED_NOTE}\n\n${STANDING_INSTRUCTION}"
+    "additionalContext": "SESSION HANDOFF LOADED [${AUTOPILOT_TAG}] — Resume the work described below.\n\n${RESUME_RULES}\n\n${ESCAPED_CONTENT}${GIT_CONTEXT}${ESCAPED_NOTE}${PENSIEVE_SECTION}${TIMETURNER_STATUS}\n\n${STANDING_INSTRUCTION}"
   }
 }
 EOF
@@ -248,10 +323,32 @@ EOF
 # Rename consumed handoff (preserved for safety; cleaned up after 1 hour)
 mv "$CLAIMED_FILE" "${HANDOFF_FILE%.md}.consumed.md" 2>/dev/null || rm -f "$CLAIMED_FILE"
 
-# Clean up nudge temp files for this session
+# Clean up nudge + pensieve temp files for this session
 if [ -n "$SESSION_ID" ]; then
   rm -f "/tmp/remembrall-nudges/$SESSION_ID"
   rm -f "/tmp/remembrall-growth/$SESSION_ID"
+  rm -f "/tmp/remembrall-pensieve/${SESSION_ID}.pos"
+  rm -f "/tmp/remembrall-pensieve/${SESSION_ID}.jsonl"
+fi
+
+# Auto-cleanup stale Time-Turner worktrees (>24h) — runs on every resume
+if [ -d "/tmp/remembrall-timeturner" ]; then
+  _now=$(date +%s)
+  for _tt_dir in /tmp/remembrall-timeturner/*/; do
+    [ -d "$_tt_dir" ] || continue
+    _tt_started=$(cat "${_tt_dir}started" 2>/dev/null) || continue
+    [[ "$_tt_started" =~ ^[0-9]+$ ]] || continue
+    if [ $((_now - _tt_started)) -gt 86400 ]; then
+      _tt_sid=$(basename "$_tt_dir")
+      # Use stored project path to target the correct repo (not current CWD)
+      _tt_project=$(cat "${_tt_dir}project_path" 2>/dev/null) || _tt_project="$CWD"
+      if [ -n "$_tt_project" ]; then
+        git -C "$_tt_project" worktree remove --force "${_tt_dir}worktree" 2>/dev/null || true
+        git -C "$_tt_project" branch -D "timeturner/${_tt_sid}" 2>/dev/null || true
+      fi
+      rm -rf "$_tt_dir" 2>/dev/null || true
+    fi
+  done
 fi
 
 exit 0

@@ -76,6 +76,13 @@ cleanup() {
   rm -f /tmp/remembrall-autonomous/test-esc-sess 2>/dev/null
   rm -f /tmp/remembrall-handoff-count/test-create-sess 2>/dev/null
   rm -f "/tmp/remembrall-sessions/$(remembrall_md5 "/tmp/test-bridge-project" 2>/dev/null)" 2>/dev/null
+  # Pensieve test cleanup
+  rm -f /tmp/remembrall-pensieve/test-pensieve-sess.jsonl 2>/dev/null
+  rm -f /tmp/remembrall-pensieve/test-pensieve-sess.pos 2>/dev/null
+  rm -f /tmp/remembrall-pensieve/test-distill-sess.jsonl 2>/dev/null
+  rm -f /tmp/remembrall-pensieve/test-map-sess.jsonl 2>/dev/null
+  # Time-Turner test cleanup
+  rm -rf /tmp/remembrall-timeturner/test-tt-sess 2>/dev/null
   true
 }
 trap cleanup EXIT
@@ -132,16 +139,32 @@ assert_eq "simple string unchanged" "simple" "$ESCAPED3"
 echo ""
 echo "remembrall_handoff_dir:"
 DIR=$(remembrall_handoff_dir "/tmp/my-project")
-assert_match "under .remembrall/handoffs/" '\.remembrall/handoffs/[0-9a-f]{32}$' "$DIR"
+assert_match "under .remembrall/handoffs/<project-name>-<hash>" '\.remembrall/handoffs/my-project-[0-9a-f]{8}$' "$DIR"
 
 DIR2=$(remembrall_handoff_dir "/tmp/my-project")
 assert_eq "deterministic for same cwd" "$DIR" "$DIR2"
+
+# Collision safety: same basename, different parent
+DIR3=$(remembrall_handoff_dir "/work/clientA/api")
+DIR4=$(remembrall_handoff_dir "/work/clientB/api")
+if [ "$DIR3" != "$DIR4" ]; then
+  printf "${GREEN}  PASS${RESET} collision safe: different parents produce different dirs\n"
+  PASS=$((PASS + 1))
+else
+  printf "${RED}  FAIL${RESET} collision safe: different parents produce different dirs\n"
+  FAIL=$((FAIL + 1))
+  ERRORS="${ERRORS}\n  - collision safe: different parents produce different dirs"
+fi
+
+# Edge case: CWD is "." — should not produce path traversal
+DIR_DOT=$(remembrall_handoff_dir ".")
+assert_match "dot CWD handled safely" '\.remembrall/handoffs/default-[0-9a-f]{8}$' "$DIR_DOT"
 
 # ── remembrall_patches_dir ────────────────────────────────────────
 echo ""
 echo "remembrall_patches_dir:"
 PDIR=$(remembrall_patches_dir "/tmp/my-project")
-assert_match "under .remembrall/patches/" '\.remembrall/patches/[0-9a-f]{32}$' "$PDIR"
+assert_match "under .remembrall/patches/<project-name>-<hash>" '\.remembrall/patches/my-project-[0-9a-f]{8}$' "$PDIR"
 
 # ── remembrall_config / remembrall_config_set ─────────────────────
 echo ""
@@ -402,7 +425,8 @@ assert_eq "YAML legacy: extracts branch" "develop" "$(remembrall_frontmatter_get
 echo ""
 echo "remembrall_team_handoff_dir:"
 TDIR=$(remembrall_team_handoff_dir "/tmp/my-project")
-assert_eq "team dir is project-local" "/tmp/my-project/.remembrall/handoffs" "$TDIR"
+EXPECTED_TEAM=$(remembrall_handoff_dir "/tmp/my-project")
+assert_eq "team dir is centralized (same as personal)" "$EXPECTED_TEAM" "$TDIR"
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -420,51 +444,53 @@ mkdir -p "$CTX_DIR"
 TEST_CWD="/tmp/remembrall-test-cwd-$$"
 mkdir -p "$TEST_CWD"
 
+# Force normal mode for these tests (autonomous is default, but normal uses EnterPlanMode)
+remembrall_config_set "autonomous_mode" "false" 2>/dev/null
+
 # High context (85%) — should produce no output
 echo "85" > "$CTX_DIR/test-sess"
 OUTPUT=$(echo '{"session_id":"test-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
 assert_eq "85% remaining: silent" "" "$OUTPUT"
 
-# 50% — journal checkpoint
-echo "50" > "$CTX_DIR/test-sess"
+# 55% — journal checkpoint (threshold default: 65)
+echo "55" > "$CTX_DIR/test-sess"
 rm -f "/tmp/remembrall-nudges/test-sess"
 OUTPUT=$(echo '{"session_id":"test-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
-assert_match "50% triggers checkpoint nudge" "REMEMBRALL:.*save progress" "$OUTPUT"
-assert_match "50% checkpoint suggests /handoff" "/handoff" "$OUTPUT"
+assert_match "55% triggers checkpoint nudge" "REMEMBRALL:.*save progress" "$OUTPUT"
+assert_match "55% checkpoint suggests /handoff" "/handoff" "$OUTPUT"
 
-# 50% again — should be suppressed (already nudged)
+# 55% again — should be suppressed (already nudged)
 OUTPUT=$(echo '{"session_id":"test-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
-assert_eq "50% second time: suppressed" "" "$OUTPUT"
+assert_eq "55% second time: suppressed" "" "$OUTPUT"
 
-# 25% — warning with plan mode
-echo "25" > "$CTX_DIR/test-sess"
+# 34% — warning with plan mode (threshold default: 35)
+echo "34" > "$CTX_DIR/test-sess"
 OUTPUT=$(echo '{"session_id":"test-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
-assert_match "25% triggers warning" "REMEMBRALL_WARN.*EnterPlanMode" "$OUTPUT"
-assert_match "25% warning suggests EnterPlanMode" "EnterPlanMode" "$OUTPUT"
+assert_match "34% triggers warning" "REMEMBRALL_WARN.*EnterPlanMode" "$OUTPUT"
+assert_match "34% warning suggests EnterPlanMode" "EnterPlanMode" "$OUTPUT"
 
-# 25% again — persistent (no handoff yet)
+# 34% again — persistent (no handoff yet)
 OUTPUT=$(echo '{"session_id":"test-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
-assert_match "25% second time: persistent (no handoff yet)" "REMEMBRALL_WARN" "$OUTPUT"
+assert_match "34% second time: persistent (no handoff yet)" "REMEMBRALL_WARN" "$OUTPUT"
 
-# 15% — urgent with plan mode
-echo "15" > "$CTX_DIR/test-sess"
+# 24% — urgent with plan mode (threshold default: 25)
+echo "24" > "$CTX_DIR/test-sess"
 OUTPUT=$(echo '{"session_id":"test-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
-assert_match "15% triggers urgent" "REMEMBRALL_URGENT.*critical" "$OUTPUT"
-assert_match "15% urgent requires EnterPlanMode" "EnterPlanMode" "$OUTPUT"
-assert_match "15% urgent says run /handoff NOW" "run /handoff NOW" "$OUTPUT"
+assert_match "24% triggers urgent" "REMEMBRALL_URGENT.*critical" "$OUTPUT"
+assert_match "24% urgent requires EnterPlanMode" "EnterPlanMode" "$OUTPUT"
+assert_match "24% urgent says Run /handoff NOW" "Run /handoff NOW" "$OUTPUT"
 
-# 15% again — stage 2: block (second consecutive prompt at ≤15%)
+# 24% again — stage 2: enforce plan mode
 OUTPUT=$(echo '{"session_id":"test-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
-assert_match "15% second time: block (two-stage escalation)" "decision.*block" "$OUTPUT"
+assert_match "24% second time: urgent with EnterPlanMode" "EnterPlanMode" "$OUTPUT"
 
-# Create handoff file — nudge should STILL fire (preemptive handoff creates
-# the same file, so we can't use it as a compliance signal)
-HASH=$(source "$PLUGIN_ROOT/hooks/lib.sh" && remembrall_md5 "$TEST_CWD")
-mkdir -p "$HOME/.remembrall/handoffs/$HASH"
-echo "# handoff" > "$HOME/.remembrall/handoffs/$HASH/handoff-test-sess.md"
+# Create handoff file — nudge should STILL fire
+HOFF_DIR=$(source "$PLUGIN_ROOT/hooks/lib.sh" && remembrall_handoff_dir "$TEST_CWD")
+mkdir -p "$HOFF_DIR"
+echo "# handoff" > "$HOFF_DIR/handoff-test-sess.md"
 OUTPUT=$(echo '{"session_id":"test-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
-assert_match "15% after handoff saved: block with clear+replay message" "Handoff already saved.*clear" "$OUTPUT"
-rm -f "$HOME/.remembrall/handoffs/$HASH/handoff-test-sess.md"
+assert_match "24% after handoff saved: urgent with EnterPlanMode" "Handoff already saved.*EnterPlanMode" "$OUTPUT"
+rm -f "$HOFF_DIR/handoff-test-sess.md"
 
 # 90% — reset (post-compaction)
 echo "90" > "$CTX_DIR/test-sess"
@@ -473,81 +499,74 @@ assert_eq "90% post-compaction: silent + reset" "" "$OUTPUT"
 [ ! -f "/tmp/remembrall-nudges/test-sess" ] && R="cleaned" || R="exists"
 assert_eq "nudge file cleaned after reset" "cleaned" "$R"
 
-# Cleanup
+# Cleanup + restore autonomous default
 rm -f "$CTX_DIR/test-sess"
 rm -rf "$TEST_CWD"
 rm -f "/tmp/remembrall-nudges/test-sess"
+remembrall_config_set "autonomous_mode" "true" 2>/dev/null
 
-# ── context-monitor.sh (autonomous mode) ─────────────────────────
+# ── context-monitor.sh (autonomous vs normal mode) ───────────────
 echo ""
-echo "context-monitor.sh (autonomous mode):"
+echo "context-monitor.sh (autonomous vs normal mode):"
 
 CTX_DIR="/tmp/claude-context-pct"
 mkdir -p "$CTX_DIR"
 TEST_CWD="/tmp/remembrall-test-auto-$$"
 mkdir -p "$TEST_CWD"
 
-# Set autonomous mode for this session
-remembrall_set_autonomous "test-auto-sess" "ralph-loop"
+# Autonomous mode helpers still work
+remembrall_set_autonomous "test-auto-sess" "test-skill"
 R=$(remembrall_is_autonomous "test-auto-sess") && STATUS=0 || STATUS=1
 assert_eq "autonomous mode set" "0" "$STATUS"
-assert_eq "autonomous skill name" "ralph-loop" "$R"
-
-# 25% in autonomous mode — should suggest /handoff, NOT EnterPlanMode
-echo "25" > "$CTX_DIR/test-auto-sess"
-rm -f "/tmp/remembrall-nudges/test-auto-sess"
-OUTPUT=$(echo '{"session_id":"test-auto-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
-assert_match "25% autonomous: mentions AUTONOMOUS MODE" "AUTONOMOUS MODE" "$OUTPUT"
-assert_match "25% autonomous: mentions /handoff" "/handoff" "$OUTPUT"
-assert_match "25% autonomous: mentions ralph-loop" "ralph-loop" "$OUTPUT"
-# Must NOT mention EnterPlanMode
-if echo "$OUTPUT" | grep -q "EnterPlanMode"; then
-  printf "${RED}  FAIL${RESET} 25%% autonomous: must NOT mention EnterPlanMode\n"
-  FAIL=$((FAIL + 1))
-else
-  printf "${GREEN}  PASS${RESET} 25%% autonomous: does not mention EnterPlanMode\n"
-  PASS=$((PASS + 1))
-fi
-
-# 15% in autonomous mode — urgent, same autonomous path
-echo "15" > "$CTX_DIR/test-auto-sess"
-OUTPUT=$(echo '{"session_id":"test-auto-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
-assert_match "15% autonomous urgent: mentions AUTONOMOUS MODE" "AUTONOMOUS MODE" "$OUTPUT"
-assert_match "15% autonomous urgent: says /handoff NOW" "/handoff NOW" "$OUTPUT"
-if echo "$OUTPUT" | grep -q "EnterPlanMode"; then
-  printf "${RED}  FAIL${RESET} 15%% autonomous urgent: must NOT mention EnterPlanMode\n"
-  FAIL=$((FAIL + 1))
-else
-  printf "${GREEN}  PASS${RESET} 15%% autonomous urgent: does not mention EnterPlanMode\n"
-  PASS=$((PASS + 1))
-fi
-
-# Clear autonomous mode
+assert_eq "autonomous skill name" "test-skill" "$R"
 remembrall_clear_autonomous "test-auto-sess"
 R=$(remembrall_is_autonomous "test-auto-sess") && STATUS=0 || STATUS=1
 assert_eq "autonomous mode cleared" "1" "$STATUS"
 
-# Config-based autonomous mode (no marker file needed)
-remembrall_clear_autonomous "test-auto-cfg"
-rm -f "/tmp/remembrall-nudges/test-auto-cfg"
-remembrall_config_set "autonomous_mode" "true"
-echo "25" > "$CTX_DIR/test-auto-cfg"
-OUTPUT=$(echo '{"session_id":"test-auto-cfg","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
-assert_match "25% config autonomous: mentions AUTONOMOUS MODE" "AUTONOMOUS MODE" "$OUTPUT"
-assert_match "25% config autonomous: mentions config" "config" "$OUTPUT"
+# Autonomous mode (config): warning at 34% — no EnterPlanMode, keep working
+remembrall_config_set "autonomous_mode" "true" 2>/dev/null
+echo "34" > "$CTX_DIR/test-auto-sess"
+rm -f "/tmp/remembrall-nudges/test-auto-sess"
+OUTPUT=$(echo '{"session_id":"test-auto-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
+assert_match "34% autonomous: mentions AUTONOMOUS MODE" "AUTONOMOUS MODE" "$OUTPUT"
+assert_match "34% autonomous: mentions /handoff" "/handoff" "$OUTPUT"
 if echo "$OUTPUT" | grep -q "EnterPlanMode"; then
-  printf "${RED}  FAIL${RESET} 25%% config autonomous: must NOT mention EnterPlanMode\n"
+  printf "${RED}  FAIL${RESET} 34%% autonomous: must NOT mention EnterPlanMode\n"
   FAIL=$((FAIL + 1))
 else
-  printf "${GREEN}  PASS${RESET} 25%% config autonomous: does not mention EnterPlanMode\n"
+  printf "${GREEN}  PASS${RESET} 34%% autonomous: no EnterPlanMode (auto-compaction)\n"
   PASS=$((PASS + 1))
 fi
-remembrall_config_set "autonomous_mode" "false"
+
+# Autonomous mode: urgent at 24% — same, no EnterPlanMode
+echo "24" > "$CTX_DIR/test-auto-sess"
+rm -f "/tmp/remembrall-nudges/test-auto-sess"
+OUTPUT=$(echo '{"session_id":"test-auto-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
+assert_match "24% autonomous urgent: mentions /handoff NOW" "/handoff NOW" "$OUTPUT"
+if echo "$OUTPUT" | grep -q "EnterPlanMode"; then
+  printf "${RED}  FAIL${RESET} 24%% autonomous urgent: must NOT mention EnterPlanMode\n"
+  FAIL=$((FAIL + 1))
+else
+  printf "${GREEN}  PASS${RESET} 24%% autonomous urgent: no EnterPlanMode (auto-compaction)\n"
+  PASS=$((PASS + 1))
+fi
+
+# Normal mode: warning at 34% — EnterPlanMode + user clicks clear
+remembrall_config_set "autonomous_mode" "false" 2>/dev/null
+echo "34" > "$CTX_DIR/test-auto-sess"
+rm -f "/tmp/remembrall-nudges/test-auto-sess"
+OUTPUT=$(echo '{"session_id":"test-auto-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
+assert_match "34% normal: includes EnterPlanMode" "EnterPlanMode" "$OUTPUT"
+assert_match "34% normal: has systemMessage" "systemMessage" "$OUTPUT"
+assert_match "34% normal: mentions auto-resumes" "auto-resumes" "$OUTPUT"
+
+# Restore default
+remembrall_config_set "autonomous_mode" "true" 2>/dev/null
 
 # Cleanup
-rm -f "$CTX_DIR/test-auto-sess" "$CTX_DIR/test-auto-cfg"
+rm -f "$CTX_DIR/test-auto-sess"
 rm -rf "$TEST_CWD"
-rm -f "/tmp/remembrall-nudges/test-auto-sess" "/tmp/remembrall-nudges/test-auto-cfg"
+rm -f "/tmp/remembrall-nudges/test-auto-sess"
 
 # ── session-resume.sh ─────────────────────────────────────────────
 echo ""
@@ -568,8 +587,7 @@ assert_match "compact without handoff: emits standing instruction" "REMEMBRALL A
 rm -rf "$COMPACT_CWD"
 
 # Compact resume with handoff file
-HASH=$(remembrall_md5 "$TEST_CWD")
-HANDOFF_DIR="$HOME/.remembrall/handoffs/$HASH"
+HANDOFF_DIR=$(remembrall_handoff_dir "$TEST_CWD")
 mkdir -p "$HANDOFF_DIR"
 cat > "$HANDOFF_DIR/handoff-test-resume.md" << 'HEOF'
 ---
@@ -601,6 +619,62 @@ assert_eq "consumed handoff renamed to .consumed.md" "renamed" "$R"
 # Cleanup
 rm -rf "$TEST_CWD" "$HANDOFF_DIR"
 
+# ── Autopilot resume (autonomous mode) ────────────────────────────
+echo ""
+echo "Session Autopilot resume:"
+
+TEST_CWD="/tmp/remembrall-test-autopilot-$$"
+mkdir -p "$TEST_CWD"
+HANDOFF_DIR=$(remembrall_handoff_dir "$TEST_CWD")
+mkdir -p "$HANDOFF_DIR"
+
+# Create handoff
+cat > "$HANDOFF_DIR/handoff-test-autopilot.md" << 'HEOF'
+---
+{
+  "session_id": "test-autopilot",
+  "status": "in_progress"
+}
+---
+
+# Session Handoff
+**Task:** Refactor the parser
+HEOF
+
+# Set autonomous mode marker for this session
+mkdir -p /tmp/remembrall-autonomous
+echo "autopilot-test" > /tmp/remembrall-autonomous/test-autopilot
+
+# Resume in compact mode — should detect autopilot
+OUTPUT=$(echo '{"source":"compact","session_id":"test-autopilot","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/session-resume.sh" 2>/dev/null)
+assert_match "autopilot resume: tagged AUTOPILOT" "AUTOPILOT" "$OUTPUT"
+assert_match "autopilot resume: no ask-to-continue" "START WORKING immediately" "$OUTPUT"
+assert_match "autopilot resume: contains task" "Refactor the parser" "$OUTPUT"
+
+# Attended mode — should say "Ask the user"
+rm -f /tmp/remembrall-autonomous/test-autopilot
+remembrall_config_set "autonomous_mode" "false" 2>/dev/null
+HANDOFF_DIR2=$(remembrall_handoff_dir "$TEST_CWD")
+cat > "$HANDOFF_DIR2/handoff-test-attended.md" << 'HEOF'
+---
+{
+  "session_id": "test-attended",
+  "status": "in_progress"
+}
+---
+
+# Session Handoff
+**Task:** Fix the tests
+HEOF
+
+OUTPUT2=$(echo '{"source":"compact","session_id":"test-attended","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/session-resume.sh" 2>/dev/null)
+assert_match "attended resume: tagged ATTENDED" "ATTENDED" "$OUTPUT2"
+assert_match "attended resume: asks user to continue" "Ask the user" "$OUTPUT2"
+
+# Cleanup — restore autonomous default
+remembrall_config_set "autonomous_mode" "true" 2>/dev/null
+rm -rf "$TEST_CWD" "$HANDOFF_DIR" "$HANDOFF_DIR2"
+
 # ── stop-check.sh ─────────────────────────────────────────────────
 echo ""
 echo "stop-check.sh:"
@@ -619,13 +693,12 @@ echo "30" > "$CTX_DIR/test-stop-sess"
 OUTPUT=$(echo '{"session_id":"test-stop-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/stop-check.sh" 2>/dev/null)
 assert_match "30% no handoff: enforces handoff" "MUST run /handoff" "$OUTPUT"
 
-# Low context, with handoff — suggest /clear + /replay via stderr
-HASH=$(remembrall_md5 "$TEST_CWD")
-STOP_HANDOFF_DIR="$HOME/.remembrall/handoffs/$HASH"
+# Low context, with handoff — confirm auto-resume message via stderr
+STOP_HANDOFF_DIR=$(remembrall_handoff_dir "$TEST_CWD")
 mkdir -p "$STOP_HANDOFF_DIR"
 echo "test" > "$STOP_HANDOFF_DIR/handoff-test-stop-sess.md"
 OUTPUT=$(echo '{"session_id":"test-stop-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/stop-check.sh" 2>&1)
-assert_match "30% with handoff: suggests /clear" "/clear" "$OUTPUT"
+assert_match "30% with handoff: confirms auto-resume" "auto-resume" "$OUTPUT"
 rm -rf "$STOP_HANDOFF_DIR"
 
 # Cleanup
@@ -642,7 +715,7 @@ export CLAUDE_SESSION_ID="test-path-sess"
 
 OUTPUT=$(bash "$PLUGIN_ROOT/hooks/handoff-path.sh" "$TEST_CWD" 2>/dev/null)
 assert_match "outputs valid handoff path" 'handoff-test-path-sess\.md$' "$OUTPUT"
-assert_match "path under .remembrall/handoffs/" '\.remembrall/handoffs/[0-9a-f]' "$OUTPUT"
+assert_match "path under .remembrall/handoffs/<project>-<hash>" '\.remembrall/handoffs/.*-[0-9a-f]{8}/' "$OUTPUT"
 
 # Without session ID — uses timestamp fallback
 unset CLAUDE_SESSION_ID
@@ -691,8 +764,7 @@ COUNTER_FILE="/tmp/remembrall-handoff-count/test-create-sess"
 assert_eq "handoff counter incremented to 1" "1" "$HCOUNT"
 
 rm -rf "$TEST_CWD"
-HASH=$(remembrall_md5 "$TEST_CWD")
-rm -rf "$HOME/.remembrall/handoffs/$HASH"
+rm -rf "$(remembrall_handoff_dir "$TEST_CWD")"
 unset CLAUDE_SESSION_ID
 
 
@@ -705,8 +777,7 @@ echo ""
 echo "Handoff chains (remembrall_previous_session):"
 TEST_CWD="/tmp/remembrall-test-chain-$$"
 mkdir -p "$TEST_CWD"
-HASH=$(remembrall_md5 "$TEST_CWD")
-CHAIN_DIR="$HOME/.remembrall/handoffs/$HASH"
+CHAIN_DIR=$(remembrall_handoff_dir "$TEST_CWD")
 mkdir -p "$CHAIN_DIR"
 
 # No previous handoffs
@@ -746,8 +817,7 @@ echo ""
 echo "Concurrent sessions:"
 TEST_CWD="/tmp/remembrall-test-concurrent-$$"
 mkdir -p "$TEST_CWD"
-HASH=$(remembrall_md5 "$TEST_CWD")
-HANDOFF_DIR="$HOME/.remembrall/handoffs/$HASH"
+HANDOFF_DIR=$(remembrall_handoff_dir "$TEST_CWD")
 mkdir -p "$HANDOFF_DIR"
 
 # Create two handoff files
@@ -1432,8 +1502,8 @@ rm -f "$HOME/.remembrall/config.json"
 R=$(remembrall_threshold "journal" 60)
 assert_eq "default journal threshold" "60" "$R"
 
-R=$(remembrall_threshold "warning" 30)
-assert_eq "default warning threshold" "30" "$R"
+R=$(remembrall_threshold "warning" 35)
+assert_eq "default warning threshold" "35" "$R"
 
 R=$(remembrall_threshold "urgent" 20)
 assert_eq "default urgent threshold" "20" "$R"
@@ -1691,6 +1761,1078 @@ assert_eq "plugin_root fails gracefully" "FAIL" "$GOT"
 
 # Clean up
 rm -rf /tmp/remembrall-meta 2>/dev/null
+
+# ═══════════════════════════════════════════════════════════════════
+echo ""
+echo "Pensieve & Time-Turner tests"
+echo "════════════════════════════"
+
+# ── Pensieve lib.sh functions ─────────────────────────────────────
+echo ""
+echo "Pensieve: remembrall_pensieve_dir"
+echo "──────────────────────────────────"
+
+# remembrall_pensieve_dir produces correct path
+PDIR=$(remembrall_pensieve_dir "/tmp/my-project")
+assert_match "pensieve dir under .remembrall/pensieve/<name>-<hash>" '\.remembrall/pensieve/my-project-[0-9a-f]{8}$' "$PDIR"
+
+# deterministic
+PDIR2=$(remembrall_pensieve_dir "/tmp/my-project")
+assert_eq "pensieve dir deterministic" "$PDIR" "$PDIR2"
+
+# collision safe
+PDIR3=$(remembrall_pensieve_dir "/work/a/api")
+PDIR4=$(remembrall_pensieve_dir "/work/b/api")
+if [ "$PDIR3" != "$PDIR4" ]; then
+  printf "${GREEN}  PASS${RESET} pensieve dir collision safe\n"; PASS=$((PASS+1))
+else
+  printf "${RED}  FAIL${RESET} pensieve dir collision safe\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - pensieve dir collision safe"
+fi
+
+# remembrall_pensieve_tmp returns correct path
+PTMP=$(remembrall_pensieve_tmp)
+assert_eq "pensieve tmp dir" "/tmp/remembrall-pensieve" "$PTMP"
+
+# pensieve dir differs from handoff dir for same CWD
+PENSIEVE_D=$(remembrall_pensieve_dir "/tmp/my-project")
+HANDOFF_D=$(remembrall_handoff_dir "/tmp/my-project")
+if [ "$PENSIEVE_D" != "$HANDOFF_D" ]; then
+  printf "${GREEN}  PASS${RESET} pensieve dir differs from handoff dir\n"; PASS=$((PASS+1))
+else
+  printf "${RED}  FAIL${RESET} pensieve dir differs from handoff dir\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - pensieve dir differs from handoff dir"
+fi
+
+# ── Pensieve config validation ────────────────────────────────────
+echo ""
+echo "Pensieve: config validation"
+echo "───────────────────────────"
+
+# pensieve boolean validation
+remembrall_config_validate "pensieve" "true" 2>/dev/null && assert_eq "pensieve=true valid" "0" "0" || assert_eq "pensieve=true valid" "0" "1"
+remembrall_config_validate "pensieve" "false" 2>/dev/null && assert_eq "pensieve=false valid" "0" "0" || assert_eq "pensieve=false valid" "0" "1"
+remembrall_config_validate "pensieve" "maybe" 2>/dev/null && assert_eq "pensieve=maybe invalid" "1" "0" || assert_eq "pensieve=maybe invalid" "0" "0"
+
+# pensieve_max_sessions positive integer validation
+remembrall_config_validate "pensieve_max_sessions" "3" 2>/dev/null && assert_eq "pensieve_max_sessions=3 valid" "0" "0" || assert_eq "pensieve_max_sessions=3 valid" "0" "1"
+remembrall_config_validate "pensieve_max_sessions" "0" 2>/dev/null && assert_eq "pensieve_max_sessions=0 invalid" "1" "0" || assert_eq "pensieve_max_sessions=0 invalid" "0" "0"
+
+# pensieve_inject_budget
+remembrall_config_validate "pensieve_inject_budget" "2000" 2>/dev/null && assert_eq "inject_budget=2000 valid" "0" "0" || assert_eq "inject_budget=2000 valid" "0" "1"
+
+# ── Time-Turner config validation ─────────────────────────────────
+echo ""
+echo "Time-Turner: config validation"
+echo "──────────────────────────────"
+
+# time_turner boolean
+remembrall_config_validate "time_turner" "true" 2>/dev/null && assert_eq "time_turner=true valid" "0" "0" || assert_eq "time_turner=true valid" "0" "1"
+remembrall_config_validate "time_turner" "false" 2>/dev/null && assert_eq "time_turner=false valid" "0" "0" || assert_eq "time_turner=false valid" "0" "1"
+remembrall_config_validate "time_turner" "yes" 2>/dev/null && assert_eq "time_turner=yes invalid" "1" "0" || assert_eq "time_turner=yes invalid" "0" "0"
+
+# time_turner_model
+remembrall_config_validate "time_turner_model" "sonnet" 2>/dev/null && assert_eq "model=sonnet valid" "0" "0" || assert_eq "model=sonnet valid" "0" "1"
+remembrall_config_validate "time_turner_model" "opus" 2>/dev/null && assert_eq "model=opus valid" "0" "0" || assert_eq "model=opus valid" "0" "1"
+remembrall_config_validate "time_turner_model" "haiku" 2>/dev/null && assert_eq "model=haiku valid" "0" "0" || assert_eq "model=haiku valid" "0" "1"
+remembrall_config_validate "time_turner_model" "gpt4" 2>/dev/null && assert_eq "model=gpt4 invalid" "1" "0" || assert_eq "model=gpt4 invalid" "0" "0"
+
+# time_turner_max_budget_usd
+remembrall_config_validate "time_turner_max_budget_usd" "1.00" 2>/dev/null && assert_eq "budget=1.00 valid" "0" "0" || assert_eq "budget=1.00 valid" "0" "1"
+remembrall_config_validate "time_turner_max_budget_usd" "0.50" 2>/dev/null && assert_eq "budget=0.50 valid" "0" "0" || assert_eq "budget=0.50 valid" "0" "1"
+remembrall_config_validate "time_turner_max_budget_usd" "abc" 2>/dev/null && assert_eq "budget=abc invalid" "1" "0" || assert_eq "budget=abc invalid" "0" "0"
+
+# threshold_timeturner
+remembrall_config_validate "threshold_timeturner" "30" 2>/dev/null && assert_eq "threshold_tt=30 valid" "0" "0" || assert_eq "threshold_tt=30 valid" "0" "1"
+remembrall_config_validate "threshold_timeturner" "0" 2>/dev/null && assert_eq "threshold_tt=0 invalid" "1" "0" || assert_eq "threshold_tt=0 invalid" "0" "0"
+remembrall_config_validate "threshold_timeturner" "100" 2>/dev/null && assert_eq "threshold_tt=100 invalid" "1" "0" || assert_eq "threshold_tt=100 invalid" "0" "0"
+
+# ── Pensieve track script ─────────────────────────────────────────
+echo ""
+echo "Pensieve: pensieve-track.sh"
+echo "───────────────────────────"
+
+PENSIEVE_TRACK_CWD="/tmp/remembrall-pensieve-track-test-$$"
+mkdir -p "$PENSIEVE_TRACK_CWD"
+
+# Create a mock transcript in the real Claude Code JSONL format
+PENSIEVE_TRANSCRIPT="$TMPDIR_ROOT/pensieve-track-transcript.jsonl"
+cat > "$PENSIEVE_TRANSCRIPT" << 'PTEOF'
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"tu1","name":"Read","input":{"file_path":"/tmp/test/foo.ts"}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tu1","content":"file contents here"}]}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"tu2","name":"Edit","input":{"file_path":"/tmp/test/bar.ts","old_string":"a","new_string":"b"}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tu2","content":"edited"}]}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"tu3","name":"Bash","input":{"command":"npm test"}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tu3","content":"Exit code: 0\nAll tests passed"}]}}
+PTEOF
+
+# Run pensieve-track.sh
+echo '{"session_id":"test-pensieve-sess","cwd":"'"$PENSIEVE_TRACK_CWD"'","transcript_path":"'"$PENSIEVE_TRANSCRIPT"'"}' \
+  | bash "$PLUGIN_ROOT/hooks/pensieve-track.sh" 2>/dev/null || true
+
+# Check that JSONL output file was created
+PENSIEVE_OUT="/tmp/remembrall-pensieve/test-pensieve-sess.jsonl"
+if [ -f "$PENSIEVE_OUT" ]; then
+  printf "${GREEN}  PASS${RESET} pensieve-track: JSONL output file created\n"; PASS=$((PASS+1))
+else
+  TRACK_ERR_MSG=$(cat "$PENSIEVE_TRACK_ERR" 2>/dev/null | head -3 | tr '\n' '|') || TRACK_ERR_MSG=""
+  printf "${RED}  FAIL${RESET} pensieve-track: JSONL output file not created\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - pensieve-track: JSONL output file created"
+fi
+
+# Verify file paths present in output
+if [ -f "$PENSIEVE_OUT" ]; then
+  if jq -e '.files | has("/tmp/test/foo.ts")' "$PENSIEVE_OUT" >/dev/null 2>&1; then
+    printf "${GREEN}  PASS${RESET} pensieve-track: Read file path recorded\n"; PASS=$((PASS+1))
+  else
+    printf "${RED}  FAIL${RESET} pensieve-track: Read file path not found\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - pensieve-track: Read file path recorded"
+  fi
+
+  if jq -e '.files["/tmp/test/bar.ts"] == "E"' "$PENSIEVE_OUT" >/dev/null 2>&1; then
+    printf "${GREEN}  PASS${RESET} pensieve-track: Edit file tagged E\n"; PASS=$((PASS+1))
+  else
+    printf "${RED}  FAIL${RESET} pensieve-track: Edit file not tagged E\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - pensieve-track: Edit file tagged E"
+  fi
+
+  # Verify command present
+  if jq -e '.cmds | index("npm test")' "$PENSIEVE_OUT" >/dev/null 2>&1; then
+    printf "${GREEN}  PASS${RESET} pensieve-track: Bash command recorded\n"; PASS=$((PASS+1))
+  else
+    printf "${RED}  FAIL${RESET} pensieve-track: Bash command not found\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - pensieve-track: Bash command recorded"
+  fi
+else
+  FAIL=$((FAIL+3)); ERRORS="${ERRORS}\n  - pensieve-track: Read file path recorded\n  - pensieve-track: Edit file tagged E\n  - pensieve-track: Bash command recorded"
+fi
+
+# Idempotency: run again with same transcript — no new content → no new entry
+ENTRY_COUNT_BEFORE=$([ -f "$PENSIEVE_OUT" ] && wc -l "$PENSIEVE_OUT" | tr -d '[:alpha:] ' | tr -d '/' || echo "0") || ENTRY_COUNT_BEFORE=0
+# Trim to just the number
+ENTRY_COUNT_BEFORE=$(printf '%s' "$ENTRY_COUNT_BEFORE" | tr -d ' ' | grep -oE '^[0-9]+' || echo "0")
+echo '{"session_id":"test-pensieve-sess","cwd":"'"$PENSIEVE_TRACK_CWD"'","transcript_path":"'"$PENSIEVE_TRANSCRIPT"'"}' \
+  | bash "$PLUGIN_ROOT/hooks/pensieve-track.sh" 2>/dev/null || true
+ENTRY_COUNT_AFTER=$([ -f "$PENSIEVE_OUT" ] && wc -l "$PENSIEVE_OUT" | tr -d '[:alpha:] ' | tr -d '/' || echo "0") || ENTRY_COUNT_AFTER=0
+ENTRY_COUNT_AFTER=$(printf '%s' "$ENTRY_COUNT_AFTER" | tr -d ' ' | grep -oE '^[0-9]+' || echo "0")
+assert_eq "pensieve-track: idempotent (no new entry for same content)" "$ENTRY_COUNT_BEFORE" "$ENTRY_COUNT_AFTER"
+
+# Add new content to transcript and run again — entry count should increase
+echo '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"tu4","name":"Bash","input":{"command":"npm run build"}}]}}' >> "$PENSIEVE_TRANSCRIPT"
+echo '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tu4","content":"Exit code: 0\nbuild complete"}]}}' >> "$PENSIEVE_TRANSCRIPT"
+echo '{"session_id":"test-pensieve-sess","cwd":"'"$PENSIEVE_TRACK_CWD"'","transcript_path":"'"$PENSIEVE_TRANSCRIPT"'"}' \
+  | bash "$PLUGIN_ROOT/hooks/pensieve-track.sh" 2>/dev/null || true
+ENTRY_COUNT_NEW=$([ -f "$PENSIEVE_OUT" ] && wc -l "$PENSIEVE_OUT" | tr -d '[:alpha:] ' | tr -d '/' || echo "0") || ENTRY_COUNT_NEW=0
+ENTRY_COUNT_NEW=$(printf '%s' "$ENTRY_COUNT_NEW" | tr -d ' ' | grep -oE '^[0-9]+' || echo "0")
+if [ "${ENTRY_COUNT_NEW:-0}" -gt "${ENTRY_COUNT_BEFORE:-0}" ]; then
+  printf "${GREEN}  PASS${RESET} pensieve-track: new content appends new entry\n"; PASS=$((PASS+1))
+else
+  printf "${RED}  FAIL${RESET} pensieve-track: new content should append entry (before=%s after=%s)\n" "$ENTRY_COUNT_BEFORE" "$ENTRY_COUNT_NEW"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - pensieve-track: new content appends new entry"
+fi
+
+rm -rf "$PENSIEVE_TRACK_CWD"
+
+# ── Pensieve distill script ───────────────────────────────────────
+echo ""
+echo "Pensieve: pensieve-distill.sh"
+echo "─────────────────────────────"
+
+PENSIEVE_DISTILL_CWD="/tmp/remembrall-pensieve-distill-test-$$"
+mkdir -p "$PENSIEVE_DISTILL_CWD"
+
+# Create a JSONL file for distillation
+mkdir -p /tmp/remembrall-pensieve
+DISTILL_JSONL="/tmp/remembrall-pensieve/test-distill-sess.jsonl"
+cat > "$DISTILL_JSONL" << 'DJEOF'
+{"ts":1700000000,"files":{"/tmp/test/src.ts":"R","/tmp/test/lib.ts":"E"},"cmds":["npm test","npm run build"],"errors":["Error: cannot find module","Exit code: 1\nfailure"],"exits":{"npm test":0,"npm run build":0}}
+{"ts":1700000100,"files":{"/tmp/test/src.ts":"E"},"cmds":["npm test"],"errors":[],"exits":{"npm test":0}}
+DJEOF
+
+DISTILL_OUT=$(bash "$PLUGIN_ROOT/hooks/pensieve-distill.sh" "test-distill-sess" "$PENSIEVE_DISTILL_CWD" 2>/dev/null) || DISTILL_OUT=""
+
+# Verify JSON has required top-level fields
+if echo "$DISTILL_OUT" | jq -e '.version' >/dev/null 2>&1; then
+  printf "${GREEN}  PASS${RESET} pensieve-distill: output has version\n"; PASS=$((PASS+1))
+else
+  printf "${RED}  FAIL${RESET} pensieve-distill: output missing version\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - pensieve-distill: output has version"
+fi
+
+if echo "$DISTILL_OUT" | jq -e '.session_id == "test-distill-sess"' >/dev/null 2>&1; then
+  printf "${GREEN}  PASS${RESET} pensieve-distill: session_id correct\n"; PASS=$((PASS+1))
+else
+  printf "${RED}  FAIL${RESET} pensieve-distill: session_id incorrect\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - pensieve-distill: session_id correct"
+fi
+
+if echo "$DISTILL_OUT" | jq -e '.files and .commands and .errors and .patterns' >/dev/null 2>&1; then
+  printf "${GREEN}  PASS${RESET} pensieve-distill: has files, commands, errors, patterns\n"; PASS=$((PASS+1))
+else
+  printf "${RED}  FAIL${RESET} pensieve-distill: missing required output fields\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - pensieve-distill: has files, commands, errors, patterns"
+fi
+
+# Verify read/edit counts for /tmp/test/src.ts (1 R + 1 E = reads:1, edits:1)
+if echo "$DISTILL_OUT" | jq -e '.files["/tmp/test/src.ts"].reads == 1 and .files["/tmp/test/src.ts"].edits == 1' >/dev/null 2>&1; then
+  printf "${GREEN}  PASS${RESET} pensieve-distill: file read/edit counts correct\n"; PASS=$((PASS+1))
+else
+  printf "${RED}  FAIL${RESET} pensieve-distill: file read/edit counts wrong\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - pensieve-distill: file read/edit counts correct"
+fi
+
+# Verify error resolution heuristic: second row has no errors → first error should be resolved
+if echo "$DISTILL_OUT" | jq -e '[.errors[] | select(.resolved == true)] | length > 0' >/dev/null 2>&1; then
+  printf "${GREEN}  PASS${RESET} pensieve-distill: error resolved heuristic works\n"; PASS=$((PASS+1))
+else
+  printf "${RED}  FAIL${RESET} pensieve-distill: error resolved heuristic failed\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - pensieve-distill: error resolved heuristic works"
+fi
+
+# Verify persistence file was created in ~/.remembrall/pensieve/
+PERSIST_DIR=$(remembrall_pensieve_dir "$PENSIEVE_DISTILL_CWD")
+PERSIST_FILE="$PERSIST_DIR/session-test-distill-sess.json"
+if [ -f "$PERSIST_FILE" ]; then
+  printf "${GREEN}  PASS${RESET} pensieve-distill: persistence file created\n"; PASS=$((PASS+1))
+else
+  printf "${RED}  FAIL${RESET} pensieve-distill: persistence file not found at %s\n" "$PERSIST_FILE"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - pensieve-distill: persistence file created"
+fi
+
+# Verify empty JSONL returns exit 1
+EMPTY_JSONL="$TMPDIR_ROOT/empty-distill.jsonl"
+touch "$EMPTY_JSONL"
+# pensieve-distill reads from fixed path /tmp/remembrall-pensieve/<session_id>.jsonl
+# so test with a session that has no JSONL file
+bash "$PLUGIN_ROOT/hooks/pensieve-distill.sh" "no-such-sess-$$" "$PENSIEVE_DISTILL_CWD" 2>/dev/null && EMPTY_STATUS=0 || EMPTY_STATUS=1
+assert_eq "pensieve-distill: missing JSONL returns exit 1" "1" "$EMPTY_STATUS"
+
+rm -rf "$PENSIEVE_DISTILL_CWD"
+
+# ── Pensieve inject script ────────────────────────────────────────
+echo ""
+echo "Pensieve: pensieve-inject.sh"
+echo "─────────────────────────────"
+
+PENSIEVE_INJECT_CWD="/tmp/remembrall-pensieve-inject-test-$$"
+mkdir -p "$PENSIEVE_INJECT_CWD"
+
+# Create mock session JSON files in the pensieve dir for the test CWD
+INJECT_PENSIEVE_DIR=$(remembrall_pensieve_dir "$PENSIEVE_INJECT_CWD")
+mkdir -p "$INJECT_PENSIEVE_DIR"
+
+cat > "$INJECT_PENSIEVE_DIR/session-inject-sess1.json" << 'IJEOF'
+{
+  "version": 1,
+  "session_id": "inject-sess1",
+  "project": "/tmp/inject-test",
+  "distilled_at": "2026-03-10T12:00:00Z",
+  "files": {
+    "/tmp/inject-test/app.ts": {"reads": 2, "edits": 1},
+    "/tmp/inject-test/lib.ts": {"reads": 1, "edits": 0}
+  },
+  "commands": [
+    {"cmd": "npm test", "exit": 0, "ts": 1700000000},
+    {"cmd": "npm run build", "exit": 0, "ts": 1700000100}
+  ],
+  "errors": [{"text": "Error: module not found", "resolved": true}],
+  "patterns": {
+    "test_fix_cycles": 1,
+    "dominant_activity": "editing",
+    "unique_files": 2,
+    "total_commands": 2,
+    "total_errors": 1,
+    "resolved_errors": 1
+  }
+}
+IJEOF
+
+INJECT_OUT=$(bash "$PLUGIN_ROOT/hooks/pensieve-inject.sh" "$PENSIEVE_INJECT_CWD" 2>/dev/null) || INJECT_OUT=""
+
+# Verify output starts with PENSIEVE MEMORY
+assert_match "pensieve-inject: output starts with PENSIEVE MEMORY" "^PENSIEVE MEMORY:" "$INJECT_OUT"
+
+# Verify file names appear
+assert_match "pensieve-inject: includes file names" "app\.ts" "$INJECT_OUT"
+
+# Verify command names appear
+assert_match "pensieve-inject: includes command names" "npm" "$INJECT_OUT"
+
+# Verify budget truncation: pass tiny budget
+INJECT_TINY=$(bash "$PLUGIN_ROOT/hooks/pensieve-inject.sh" "$PENSIEVE_INJECT_CWD" 100 2>/dev/null) || INJECT_TINY=""
+if [ "${#INJECT_TINY}" -le 103 ]; then
+  printf "${GREEN}  PASS${RESET} pensieve-inject: budget truncation works (len=%d)\n" "${#INJECT_TINY}"; PASS=$((PASS+1))
+else
+  printf "${RED}  FAIL${RESET} pensieve-inject: budget truncation failed (len=%d, expected ≤103)\n" "${#INJECT_TINY}"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - pensieve-inject: budget truncation works"
+fi
+
+# Verify exit 1 when no data exists
+MISSING_CWD="/tmp/remembrall-inject-missing-$$"
+bash "$PLUGIN_ROOT/hooks/pensieve-inject.sh" "$MISSING_CWD" 2>/dev/null && INJECT_MISSING_STATUS=0 || INJECT_MISSING_STATUS=1
+assert_eq "pensieve-inject: exit 1 when no data" "1" "$INJECT_MISSING_STATUS"
+
+# Verify sessions count in header
+assert_match "pensieve-inject: sessions count in header" "sessions=1" "$INJECT_OUT"
+
+rm -rf "$PENSIEVE_INJECT_CWD"
+
+# ── Time-Turner check script ──────────────────────────────────────
+echo ""
+echo "Time-Turner: time-turner-check.sh"
+echo "──────────────────────────────────"
+
+TT_BASE="/tmp/remembrall-timeturner"
+
+# Verify exit 1 when no Time-Turner dir exists
+rm -rf "$TT_BASE/test-tt-sess" 2>/dev/null
+if [ ! -d "$TT_BASE" ]; then
+  bash "$PLUGIN_ROOT/hooks/time-turner-check.sh" "/tmp" 2>/dev/null && TT_NO_DIR_STATUS=0 || TT_NO_DIR_STATUS=1
+  assert_eq "time-turner-check: exit 1 when no base dir" "1" "$TT_NO_DIR_STATUS"
+fi
+
+# Create mock state dir with completed status
+mkdir -p "$TT_BASE/test-tt-sess"
+echo "completed" > "$TT_BASE/test-tt-sess/status"
+echo "3" > "$TT_BASE/test-tt-sess/files_changed"
+STARTED_TS=$(date +%s)
+echo "$STARTED_TS" > "$TT_BASE/test-tt-sess/started"
+FINISHED_TS=$(( STARTED_TS + 120 ))
+echo "$FINISHED_TS" > "$TT_BASE/test-tt-sess/finished"
+
+TT_OUT=$(bash "$PLUGIN_ROOT/hooks/time-turner-check.sh" "/tmp" 2>/dev/null) || TT_OUT=""
+assert_match "time-turner-check: completed status" "Time-Turner finished" "$TT_OUT"
+assert_match "time-turner-check: files changed count" "3 files" "$TT_OUT"
+
+# Test running status
+echo "running" > "$TT_BASE/test-tt-sess/status"
+# Use a PID that definitely exists (current shell)
+echo "$$" > "$TT_BASE/test-tt-sess/pid"
+
+TT_OUT2=$(bash "$PLUGIN_ROOT/hooks/time-turner-check.sh" "/tmp" 2>/dev/null) || TT_OUT2=""
+assert_match "time-turner-check: running status" "still working" "$TT_OUT2"
+
+# Test failed status
+echo "failed" > "$TT_BASE/test-tt-sess/status"
+echo "compilation error" > "$TT_BASE/test-tt-sess/error.log"
+TT_OUT3=$(bash "$PLUGIN_ROOT/hooks/time-turner-check.sh" "/tmp" 2>/dev/null) || TT_OUT3=""
+assert_match "time-turner-check: failed status" "Time-Turner failed" "$TT_OUT3"
+
+# Verify auto-cleanup of >24h entries
+OLD_STARTED=$(( $(date +%s) - 90000 ))  # 25h ago
+echo "completed" > "$TT_BASE/test-tt-sess/status"
+echo "$OLD_STARTED" > "$TT_BASE/test-tt-sess/started"
+
+bash "$PLUGIN_ROOT/hooks/time-turner-check.sh" "/tmp" 2>/dev/null && TT_STALE_STATUS=0 || TT_STALE_STATUS=1
+# Entry should be cleaned up → exit 1 (no active entries)
+assert_eq "time-turner-check: stale entry auto-cleaned (exit 1)" "1" "$TT_STALE_STATUS"
+
+if [ ! -d "$TT_BASE/test-tt-sess" ]; then
+  printf "${GREEN}  PASS${RESET} time-turner-check: stale dir removed\n"; PASS=$((PASS+1))
+else
+  printf "${RED}  FAIL${RESET} time-turner-check: stale dir should be removed\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - time-turner-check: stale dir removed"
+  rm -rf "$TT_BASE/test-tt-sess"
+fi
+
+# ── Map script ────────────────────────────────────────────────────
+echo ""
+echo "Map: remembrall-map.sh"
+echo "──────────────────────"
+
+MAP_CWD="/tmp/remembrall-map-test-$$"
+mkdir -p "$MAP_CWD"
+
+# Set up session JSONL so the map has data to display
+mkdir -p /tmp/remembrall-pensieve
+MAP_JSONL="/tmp/remembrall-pensieve/test-map-sess.jsonl"
+echo '{"ts":1700000000,"files":{"/tmp/map-test/main.ts":"E","/tmp/map-test/util.ts":"R"},"cmds":["npm test"],"errors":[],"exits":{"npm test":0}}' > "$MAP_JSONL"
+
+# Publish a session_id for the MAP_CWD so the map can find the JSONL
+remembrall_publish_session_id "$MAP_CWD" "test-map-sess"
+
+# Disable easter eggs to get clean output (avoid ANSI noise in matching)
+remembrall_config_set "easter_eggs" "false" 2>/dev/null
+
+MAP_OUT=$(bash "$PLUGIN_ROOT/scripts/remembrall-map.sh" "$MAP_CWD" 2>/dev/null) || MAP_OUT=""
+
+# Verify output contains Marauder's Map header
+assert_match "map: contains Marauder's Map header" "Marauder" "$MAP_OUT"
+
+# Verify it shows files section
+assert_match "map: shows Files Explored section" "Files Explored" "$MAP_OUT"
+
+# Verify it shows commands section
+assert_match "map: shows Commands Run section" "Commands Run" "$MAP_OUT"
+
+# Clean up
+rm -rf "$MAP_CWD"
+rm -f /tmp/remembrall-pensieve/test-map-sess.jsonl
+BRIDGE_MAP_HASH=$(remembrall_md5 "$MAP_CWD" 2>/dev/null) || true
+rm -f "/tmp/remembrall-sessions/$BRIDGE_MAP_HASH" 2>/dev/null || true
+rm -f "$HOME/.remembrall/config.json" 2>/dev/null || true
+
+# ── Integration: context-monitor Pensieve spawn ───────────────────
+echo ""
+echo "Integration: context-monitor Pensieve spawn"
+echo "────────────────────────────────────────────"
+
+CTX_DIR="/tmp/claude-context-pct"
+mkdir -p "$CTX_DIR"
+PENSIEVE_SPAWN_CWD="/tmp/remembrall-pensieve-spawn-$$"
+mkdir -p "$PENSIEVE_SPAWN_CWD"
+
+# Create a small transcript for track to process
+SPAWN_TRANSCRIPT="$TMPDIR_ROOT/pensieve-spawn-transcript.jsonl"
+echo '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"ts1","name":"Read","input":{"file_path":"/tmp/spawn/file.ts"}}]}}' > "$SPAWN_TRANSCRIPT"
+echo '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"ts1","content":"ok"}]}}' >> "$SPAWN_TRANSCRIPT"
+
+# pensieve=true: verify track is spawned (bridge at 85% → silent, but track should run)
+remembrall_config_set "pensieve" "true" 2>/dev/null
+echo "85" > "$CTX_DIR/test-pensieve-spawn-sess"
+
+# Give pensieve-track.sh a moment since it's spawned in background
+echo '{"session_id":"test-pensieve-spawn-sess","cwd":"'"$PENSIEVE_SPAWN_CWD"'","transcript_path":"'"$SPAWN_TRANSCRIPT"'"}' \
+  | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null || true
+sleep 1
+
+if [ -f "/tmp/remembrall-pensieve/test-pensieve-spawn-sess.jsonl" ]; then
+  printf "${GREEN}  PASS${RESET} pensieve=true: track spawned and created JSONL\n"; PASS=$((PASS+1))
+else
+  printf "${RED}  FAIL${RESET} pensieve=true: track JSONL not created\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - pensieve=true: track spawned and created JSONL"
+fi
+
+# pensieve=false: verify track is NOT spawned
+remembrall_config_set "pensieve" "false" 2>/dev/null
+rm -f "/tmp/remembrall-pensieve/test-pensieve-skip-sess.jsonl"
+
+SKIP_TRANSCRIPT="$TMPDIR_ROOT/pensieve-skip-transcript.jsonl"
+echo '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"sk1","name":"Read","input":{"file_path":"/tmp/skip/file.ts"}}]}}' > "$SKIP_TRANSCRIPT"
+echo '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"sk1","content":"ok"}]}}' >> "$SKIP_TRANSCRIPT"
+
+echo "85" > "$CTX_DIR/test-pensieve-skip-sess"
+echo '{"session_id":"test-pensieve-skip-sess","cwd":"'"$PENSIEVE_SPAWN_CWD"'","transcript_path":"'"$SKIP_TRANSCRIPT"'"}' \
+  | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null || true
+sleep 1
+
+if [ ! -f "/tmp/remembrall-pensieve/test-pensieve-skip-sess.jsonl" ]; then
+  printf "${GREEN}  PASS${RESET} pensieve=false: track skipped (no JSONL created)\n"; PASS=$((PASS+1))
+else
+  printf "${RED}  FAIL${RESET} pensieve=false: track should be skipped\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - pensieve=false: track skipped (no JSONL created)"
+fi
+
+# Restore defaults
+rm -f "$CTX_DIR/test-pensieve-spawn-sess" "$CTX_DIR/test-pensieve-skip-sess"
+rm -f "/tmp/remembrall-pensieve/test-pensieve-spawn-sess.jsonl" 2>/dev/null || true
+rm -f "/tmp/remembrall-pensieve/test-pensieve-skip-sess.jsonl" 2>/dev/null || true
+rm -rf "$PENSIEVE_SPAWN_CWD"
+remembrall_config_set "pensieve" "true" 2>/dev/null
+rm -f "$HOME/.remembrall/config.json" 2>/dev/null || true
+
+# ═══════════════════════════════════════════════════════════════════
+
+echo ""
+echo "v3.0.0 New Feature tests"
+echo "════════════════════════"
+
+# ── Phase 1: Session Lineage ──────────────────────────────────────
+echo ""
+echo "Session Lineage: lib.sh functions"
+echo "──────────────────────────────────"
+
+# remembrall_lineage_dir
+LDIR=$(remembrall_lineage_dir "/tmp/my-project")
+assert_match "lineage dir under .remembrall/lineage/<name>-<hash>" '\.remembrall/lineage/my-project-[0-9a-f]{8}$' "$LDIR"
+
+LDIR2=$(remembrall_lineage_dir "/tmp/my-project")
+assert_eq "lineage dir deterministic" "$LDIR" "$LDIR2"
+
+LDIR3=$(remembrall_lineage_dir "/tmp/other-project")
+if [ "$LDIR" != "$LDIR3" ]; then
+  printf "${GREEN}  PASS${RESET} lineage dir collision safe\n"; PASS=$((PASS + 1))
+else
+  printf "${RED}  FAIL${RESET} lineage dir collision safe\n"; FAIL=$((FAIL + 1)); ERRORS="${ERRORS}\n  - lineage dir collision safe"
+fi
+
+# remembrall_lineage_record + lineage_depth + lineage_branches
+LINEAGE_CWD="$TMPDIR_ROOT/lineage-test-project"
+mkdir -p "$LINEAGE_CWD"
+
+remembrall_lineage_record "sess-root" "" "$LINEAGE_CWD" "normal" "completed" "Initial work" 5
+LINEAGE_INDEX=$(remembrall_lineage_dir "$LINEAGE_CWD")/index.json
+if [ -f "$LINEAGE_INDEX" ]; then
+  printf "${GREEN}  PASS${RESET} lineage record creates index.json\n"; PASS=$((PASS + 1))
+else
+  printf "${RED}  FAIL${RESET} lineage record creates index.json\n"; FAIL=$((FAIL + 1)); ERRORS="${ERRORS}\n  - lineage record creates index.json"
+fi
+
+L_COUNT=$(jq '.sessions | length' "$LINEAGE_INDEX" 2>/dev/null) || L_COUNT=0
+assert_eq "lineage index has 1 session" "1" "$L_COUNT"
+
+L_SID=$(jq -r '.sessions[0].session_id' "$LINEAGE_INDEX" 2>/dev/null)
+assert_eq "lineage session_id correct" "sess-root" "$L_SID"
+
+L_TYPE=$(jq -r '.sessions[0].type' "$LINEAGE_INDEX" 2>/dev/null)
+assert_eq "lineage type correct" "normal" "$L_TYPE"
+
+# Add child session
+remembrall_lineage_record "sess-child" "sess-root" "$LINEAGE_CWD" "normal" "active" "Continue work" 3
+L_COUNT=$(jq '.sessions | length' "$LINEAGE_INDEX" 2>/dev/null) || L_COUNT=0
+assert_eq "lineage index has 2 sessions" "2" "$L_COUNT"
+
+# Depth
+DEPTH=$(remembrall_lineage_depth "$LINEAGE_CWD" "sess-child")
+assert_eq "lineage depth for child is 1" "1" "$DEPTH"
+
+DEPTH_ROOT=$(remembrall_lineage_depth "$LINEAGE_CWD" "sess-root")
+assert_eq "lineage depth for root is 0" "0" "$DEPTH_ROOT"
+
+# Add TT branch
+remembrall_lineage_record "sess-tt" "sess-root" "$LINEAGE_CWD" "time-turner" "merged" "TT branch" 2
+
+# Branches
+BRANCHES=$(remembrall_lineage_branches "$LINEAGE_CWD")
+assert_eq "lineage branches detects 1 branching parent" "1" "$BRANCHES"
+
+# Update existing session (should update, not duplicate)
+remembrall_lineage_record "sess-root" "" "$LINEAGE_CWD" "normal" "completed" "Updated goal" 10
+L_COUNT=$(jq '.sessions | length' "$LINEAGE_INDEX" 2>/dev/null) || L_COUNT=0
+assert_eq "lineage update doesn't duplicate" "3" "$L_COUNT"
+
+L_GOAL=$(jq -r '.sessions[] | select(.session_id == "sess-root") | .goal' "$LINEAGE_INDEX" 2>/dev/null)
+assert_eq "lineage update changes goal" "Updated goal" "$L_GOAL"
+
+# Lineage disabled
+remembrall_config_set "lineage" "false" 2>/dev/null
+remembrall_lineage_record "sess-disabled" "" "$LINEAGE_CWD" "normal" "active" "Should not record" 1
+L_COUNT=$(jq '.sessions | length' "$LINEAGE_INDEX" 2>/dev/null) || L_COUNT=0
+assert_eq "lineage disabled: no new record" "3" "$L_COUNT"
+remembrall_config_set "lineage" "true" 2>/dev/null
+
+# remembrall-lineage.sh script
+echo ""
+echo "Session Lineage: lineage script"
+echo "────────────────────────────────"
+LINEAGE_OUTPUT=$(bash "$PLUGIN_ROOT/scripts/remembrall-lineage.sh" "$LINEAGE_CWD" 2>/dev/null)
+assert_match "lineage script has header" "Session Ancestry|Session Lineage" "$LINEAGE_OUTPUT"
+assert_match "lineage script shows session count" "Sessions: 3" "$LINEAGE_OUTPUT"
+assert_match "lineage script shows root session" "sess-root" "$LINEAGE_OUTPUT"
+assert_match "lineage script shows TT branch" "TT" "$LINEAGE_OUTPUT"
+
+# lineage-record.sh hook
+echo ""
+echo "Session Lineage: lineage-record.sh hook"
+echo "─────────────────────────────────────────"
+LINEAGE_HOOK_CWD="$TMPDIR_ROOT/lineage-hook-test"
+mkdir -p "$LINEAGE_HOOK_CWD"
+jq -n --arg sid "hook-sess" --arg cwd "$LINEAGE_HOOK_CWD" --arg type "normal" --arg status "active" \
+  '{session_id: $sid, cwd: $cwd, type: $type, status: $status, goal: "hook test", files_count: 1}' | \
+  bash "$PLUGIN_ROOT/hooks/lineage-record.sh" 2>/dev/null
+HOOK_INDEX=$(remembrall_lineage_dir "$LINEAGE_HOOK_CWD")/index.json
+if [ -f "$HOOK_INDEX" ]; then
+  HOOK_SID=$(jq -r '.sessions[0].session_id' "$HOOK_INDEX" 2>/dev/null)
+  assert_eq "lineage hook records session" "hook-sess" "$HOOK_SID"
+else
+  printf "${RED}  FAIL${RESET} lineage hook records session\n"; FAIL=$((FAIL + 1)); ERRORS="${ERRORS}\n  - lineage hook records session"
+fi
+
+# lineage config validation
+echo ""
+echo "Session Lineage: config validation"
+echo "────────────────────────────────────"
+remembrall_config_set "lineage" "true" 2>/dev/null && { printf "${GREEN}  PASS${RESET} lineage=true valid\n"; PASS=$((PASS+1)); } || { printf "${RED}  FAIL${RESET} lineage=true valid\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - lineage=true valid"; }
+remembrall_config_set "lineage" "false" 2>/dev/null && { printf "${GREEN}  PASS${RESET} lineage=false valid\n"; PASS=$((PASS+1)); } || { printf "${RED}  FAIL${RESET} lineage=false valid\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - lineage=false valid"; }
+remembrall_config_set "lineage_max_entries" "50" 2>/dev/null && { printf "${GREEN}  PASS${RESET} lineage_max_entries=50 valid\n"; PASS=$((PASS+1)); } || { printf "${RED}  FAIL${RESET} lineage_max_entries=50 valid\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - lineage_max_entries=50 valid"; }
+# Cleanup
+rm -f "$HOME/.remembrall/config.json" 2>/dev/null || true
+
+# ── Phase 2: Ambient Learning / Insights ─────────────────────────
+echo ""
+echo "Insights: lib.sh functions"
+echo "──────────────────────────"
+
+# remembrall_insights_dir
+IDIR=$(remembrall_insights_dir "/tmp/my-project")
+assert_match "insights dir under .remembrall/insights/<name>-<hash>" '\.remembrall/insights/my-project-[0-9a-f]{8}$' "$IDIR"
+
+IDIR2=$(remembrall_insights_dir "/tmp/my-project")
+assert_eq "insights dir deterministic" "$IDIR" "$IDIR2"
+
+# remembrall_insights_fresh
+INSIGHTS_CWD="$TMPDIR_ROOT/insights-test-project"
+mkdir -p "$INSIGHTS_CWD"
+INSIGHTS_TEST_DIR=$(remembrall_insights_dir "$INSIGHTS_CWD")
+mkdir -p "$INSIGHTS_TEST_DIR"
+
+# No file = not fresh
+if remembrall_insights_fresh "$INSIGHTS_CWD" 2>/dev/null; then
+  printf "${RED}  FAIL${RESET} insights_fresh returns false when no file\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - insights_fresh returns false when no file"
+else
+  printf "${GREEN}  PASS${RESET} insights_fresh returns false when no file\n"; PASS=$((PASS+1))
+fi
+
+# Fresh file = fresh
+echo '{}' > "$INSIGHTS_TEST_DIR/insights.json"
+if remembrall_insights_fresh "$INSIGHTS_CWD" 2>/dev/null; then
+  printf "${GREEN}  PASS${RESET} insights_fresh returns true for fresh file\n"; PASS=$((PASS+1))
+else
+  printf "${RED}  FAIL${RESET} insights_fresh returns true for fresh file\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - insights_fresh returns true for fresh file"
+fi
+
+# insights-aggregate.sh
+echo ""
+echo "Insights: insights-aggregate.sh"
+echo "────────────────────────────────"
+INSIGHTS_AGG_CWD="$TMPDIR_ROOT/insights-agg-project"
+mkdir -p "$INSIGHTS_AGG_CWD"
+PENSIEVE_AGG_DIR=$(remembrall_pensieve_dir "$INSIGHTS_AGG_CWD")
+mkdir -p "$PENSIEVE_AGG_DIR"
+
+# Create 3 fake Pensieve sessions
+for i in 1 2 3; do
+  cat > "$PENSIEVE_AGG_DIR/session-test-${i}.json" << PENS_EOF
+{
+  "version": 1,
+  "session_id": "test-${i}",
+  "files": {"src/app.ts": {"reads": $i, "edits": 1}, "src/lib.ts": {"reads": 1, "edits": 0}},
+  "commands": ["npm test", "npm build"],
+  "errors": ["Error: module not found"],
+  "patterns": {"test_fix_cycles": [{"test": "fail", "fix": "pass"}], "dominant_activity": "coding"}
+}
+PENS_EOF
+done
+
+# Remove old insights so aggregator runs fresh
+rm -f "$(remembrall_insights_dir "$INSIGHTS_AGG_CWD")/insights.json" 2>/dev/null
+
+bash "$PLUGIN_ROOT/hooks/insights-aggregate.sh" "$INSIGHTS_AGG_CWD" 2>/dev/null
+INSIGHTS_AGG_FILE="$(remembrall_insights_dir "$INSIGHTS_AGG_CWD")/insights.json"
+
+if [ -f "$INSIGHTS_AGG_FILE" ]; then
+  printf "${GREEN}  PASS${RESET} insights aggregation creates file\n"; PASS=$((PASS+1))
+else
+  printf "${RED}  FAIL${RESET} insights aggregation creates file\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - insights aggregation creates file"
+fi
+
+I_AGG_SESSIONS=$(jq -r '.sessions_analyzed // 0' "$INSIGHTS_AGG_FILE" 2>/dev/null) || I_AGG_SESSIONS=0
+assert_eq "insights: 3 sessions analyzed" "3" "$I_AGG_SESSIONS"
+
+I_HOTSPOT_COUNT=$(jq '.file_hotspots | length' "$INSIGHTS_AGG_FILE" 2>/dev/null) || I_HOTSPOT_COUNT=0
+if [ "$I_HOTSPOT_COUNT" -gt 0 ]; then
+  printf "${GREEN}  PASS${RESET} insights: file hotspots detected\n"; PASS=$((PASS+1))
+else
+  printf "${RED}  FAIL${RESET} insights: file hotspots detected\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - insights: file hotspots detected"
+fi
+
+I_TOP_HOTSPOT=$(jq -r '.file_hotspots[0].file // ""' "$INSIGHTS_AGG_FILE" 2>/dev/null) || I_TOP_HOTSPOT=""
+assert_match "insights: top hotspot is a src file" "src/" "$I_TOP_HOTSPOT"
+
+I_ERROR_COUNT=$(jq '.error_recurrence | length' "$INSIGHTS_AGG_FILE" 2>/dev/null) || I_ERROR_COUNT=0
+if [ "$I_ERROR_COUNT" -gt 0 ]; then
+  printf "${GREEN}  PASS${RESET} insights: recurring errors detected\n"; PASS=$((PASS+1))
+else
+  printf "${RED}  FAIL${RESET} insights: recurring errors detected\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - insights: recurring errors detected"
+fi
+
+# insights: min_sessions guard
+echo ""
+echo "Insights: min_sessions guard"
+echo "─────────────────────────────"
+INSIGHTS_MIN_CWD="$TMPDIR_ROOT/insights-min-project"
+mkdir -p "$INSIGHTS_MIN_CWD"
+PENSIEVE_MIN_DIR=$(remembrall_pensieve_dir "$INSIGHTS_MIN_CWD")
+mkdir -p "$PENSIEVE_MIN_DIR"
+# Only 1 session (below default min of 3)
+cat > "$PENSIEVE_MIN_DIR/session-solo.json" << PMIN_EOF
+{"version": 1, "session_id": "solo", "files": {"app.ts": {"reads": 1}}, "commands": [], "errors": [], "patterns": {}}
+PMIN_EOF
+bash "$PLUGIN_ROOT/hooks/insights-aggregate.sh" "$INSIGHTS_MIN_CWD" 2>/dev/null
+if [ ! -f "$(remembrall_insights_dir "$INSIGHTS_MIN_CWD")/insights.json" ]; then
+  printf "${GREEN}  PASS${RESET} insights: skipped with < min_sessions\n"; PASS=$((PASS+1))
+else
+  printf "${RED}  FAIL${RESET} insights: skipped with < min_sessions\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - insights: skipped with < min_sessions"
+fi
+
+# insights script output
+echo ""
+echo "Insights: remembrall-insights.sh"
+echo "──────────────────────────────────"
+INSIGHTS_SCRIPT_OUT=$(bash "$PLUGIN_ROOT/scripts/remembrall-insights.sh" "$INSIGHTS_AGG_CWD" 2>/dev/null)
+assert_match "insights script has header" "Pensieve Remembers|Project Insights" "$INSIGHTS_SCRIPT_OUT"
+assert_match "insights script shows sessions" "3 sessions" "$INSIGHTS_SCRIPT_OUT"
+assert_match "insights script shows hotspots" "Hotspot" "$INSIGHTS_SCRIPT_OUT"
+
+# insights config validation
+remembrall_config_set "insights" "true" 2>/dev/null && { printf "${GREEN}  PASS${RESET} insights=true valid\n"; PASS=$((PASS+1)); } || { printf "${RED}  FAIL${RESET} insights=true valid\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - insights=true valid"; }
+remembrall_config_set "insights_min_sessions" "5" 2>/dev/null && { printf "${GREEN}  PASS${RESET} insights_min_sessions=5 valid\n"; PASS=$((PASS+1)); } || { printf "${RED}  FAIL${RESET} insights_min_sessions=5 valid\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - insights_min_sessions=5 valid"; }
+rm -f "$HOME/.remembrall/config.json" 2>/dev/null || true
+
+# ── Phase 3: Obliviate ────────────────────────────────────────────
+echo ""
+echo "Obliviate: lib.sh functions"
+echo "────────────────────────────"
+
+# remembrall_memory_dirs
+# Create a fake memory dir
+mkdir -p "$HOME/.claude/projects/test-project/memory"
+echo "test" > "$HOME/.claude/projects/test-project/memory/test-mem.md"
+MDIRS=$(remembrall_memory_dirs)
+assert_match "memory_dirs finds project memory" "test-project/memory" "$MDIRS"
+
+# remembrall_obliviate_dir
+ODIR=$(remembrall_obliviate_dir)
+assert_eq "obliviate dir is /tmp/remembrall-obliviate" "/tmp/remembrall-obliviate" "$ODIR"
+
+# obliviate-analyze.sh
+echo ""
+echo "Obliviate: obliviate-analyze.sh"
+echo "─────────────────────────────────"
+OBLIVIATE_CWD="$TMPDIR_ROOT/obliviate-test-project"
+mkdir -p "$OBLIVIATE_CWD"
+
+# Create fake memory files (some stale, some fresh)
+OBLIVIATE_PROJECT_HASH=$(printf '%s' "$OBLIVIATE_CWD" | sed 's|/|-|g; s|^-||')
+OBLIVIATE_MEM_DIR="$HOME/.claude/projects/${OBLIVIATE_PROJECT_HASH}/memory"
+mkdir -p "$OBLIVIATE_MEM_DIR"
+echo "---
+name: old-memory
+type: project
+---
+Old project memory" > "$OBLIVIATE_MEM_DIR/old-memory.md"
+echo "---
+name: fresh-memory
+type: feedback
+---
+Fresh feedback" > "$OBLIVIATE_MEM_DIR/fresh-memory.md"
+echo "# Memory Index
+- [old-memory.md](old-memory.md) — old project memory
+- [fresh-memory.md](fresh-memory.md) — fresh feedback" > "$OBLIVIATE_MEM_DIR/MEMORY.md"
+
+# Make old-memory stale (touch with old timestamp)
+touch -t 202601010000 "$OBLIVIATE_MEM_DIR/old-memory.md" 2>/dev/null || true
+
+OBLIVIATE_SESS="test-obliviate-sess"
+rm -f "/tmp/remembrall-obliviate/${OBLIVIATE_SESS}.json" 2>/dev/null || true
+
+jq -n --arg sid "$OBLIVIATE_SESS" --arg cwd "$OBLIVIATE_CWD" '{session_id: $sid, cwd: $cwd}' | \
+  bash "$PLUGIN_ROOT/hooks/obliviate-analyze.sh" 2>/dev/null
+
+OBLIVIATE_REPORT="/tmp/remembrall-obliviate/${OBLIVIATE_SESS}.json"
+if [ -f "$OBLIVIATE_REPORT" ]; then
+  printf "${GREEN}  PASS${RESET} obliviate analyzer creates report\n"; PASS=$((PASS+1))
+  O_STALE=$(jq -r '.stale_count // 0' "$OBLIVIATE_REPORT" 2>/dev/null) || O_STALE=0
+  if [ "$O_STALE" -gt 0 ]; then
+    printf "${GREEN}  PASS${RESET} obliviate detects stale memories (count: $O_STALE)\n"; PASS=$((PASS+1))
+  else
+    printf "${RED}  FAIL${RESET} obliviate detects stale memories\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - obliviate detects stale memories"
+  fi
+else
+  printf "${RED}  FAIL${RESET} obliviate analyzer creates report\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - obliviate analyzer creates report"
+  printf "${RED}  FAIL${RESET} obliviate detects stale memories\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - obliviate detects stale memories"
+fi
+
+# obliviate-archive.sh dry run
+echo ""
+echo "Obliviate: obliviate-archive.sh"
+echo "─────────────────────────────────"
+if [ -f "$OBLIVIATE_REPORT" ]; then
+  DRY_OUTPUT=$(bash "$PLUGIN_ROOT/scripts/obliviate-archive.sh" --dry-run "$OBLIVIATE_SESS" 2>/dev/null)
+  assert_match "obliviate dry-run: shows would archive" "dry-run.*Would archive|dry-run.*No stale" "$DRY_OUTPUT"
+fi
+
+# obliviate config validation
+remembrall_config_set "obliviate" "true" 2>/dev/null && { printf "${GREEN}  PASS${RESET} obliviate=true valid\n"; PASS=$((PASS+1)); } || { printf "${RED}  FAIL${RESET} obliviate=true valid\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - obliviate=true valid"; }
+remembrall_config_set "obliviate_stale_sessions" "5" 2>/dev/null && { printf "${GREEN}  PASS${RESET} obliviate_stale_sessions=5 valid\n"; PASS=$((PASS+1)); } || { printf "${RED}  FAIL${RESET} obliviate_stale_sessions=5 valid\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - obliviate_stale_sessions=5 valid"; }
+
+# Cleanup
+rm -f "$OBLIVIATE_REPORT" 2>/dev/null || true
+rm -f "$HOME/.remembrall/config.json" 2>/dev/null || true
+
+# ── Phase 4: Context Budget Allocation ────────────────────────────
+echo ""
+echo "Budget: lib.sh functions"
+echo "─────────────────────────"
+
+# remembrall_budget_dir
+BDIR=$(remembrall_budget_dir)
+assert_eq "budget dir is /tmp/remembrall-budget" "/tmp/remembrall-budget" "$BDIR"
+
+# remembrall_budget_validate_total (defaults)
+if remembrall_budget_validate_total 2>/dev/null; then
+  printf "${GREEN}  PASS${RESET} budget defaults sum to 100\n"; PASS=$((PASS+1))
+else
+  printf "${RED}  FAIL${RESET} budget defaults sum to 100\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - budget defaults sum to 100"
+fi
+
+# Custom budget that sums to 100
+remembrall_config_set "budget_code" "40" 2>/dev/null
+remembrall_config_set "budget_conversation" "40" 2>/dev/null
+remembrall_config_set "budget_memory" "20" 2>/dev/null
+if remembrall_budget_validate_total 2>/dev/null; then
+  printf "${GREEN}  PASS${RESET} custom budget 40/40/20 sums to 100\n"; PASS=$((PASS+1))
+else
+  printf "${RED}  FAIL${RESET} custom budget 40/40/20 sums to 100\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - custom budget 40/40/20 sums to 100"
+fi
+
+# Budget that doesn't sum to 100
+remembrall_config_set "budget_code" "60" 2>/dev/null
+if remembrall_budget_validate_total 2>/dev/null; then
+  printf "${RED}  FAIL${RESET} budget 60/40/20 should not sum to 100\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - budget 60/40/20 should not sum to 100"
+else
+  printf "${GREEN}  PASS${RESET} budget 60/40/20 rejected (sums to 120)\n"; PASS=$((PASS+1))
+fi
+rm -f "$HOME/.remembrall/config.json" 2>/dev/null || true
+
+# remembrall_extract_category_bytes
+echo ""
+echo "Budget: extract_category_bytes"
+echo "───────────────────────────────"
+BUDGET_TRANSCRIPT="$TMPDIR_ROOT/budget-transcript.jsonl"
+# Create a minimal JSONL with different types of content
+cat > "$BUDGET_TRANSCRIPT" << 'BTRANS_EOF'
+[
+  {"type":"system","content":"System prompt with instructions"},
+  {"type":"user","content":[{"type":"text","text":"Hello, please help me"}]},
+  {"type":"assistant","content":[{"type":"text","text":"Sure, I can help."},{"type":"tool_use","name":"Read","input":{"file_path":"/tmp/test.ts"}}]},
+  {"type":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"file content here is some code"}]},
+  {"type":"assistant","content":[{"type":"text","text":"Here is my analysis."}]},
+  {"type":"user","content":[{"type":"text","text":"REMEMBRALL additionalContext: context injection data here"}]}
+]
+BTRANS_EOF
+
+BUDGET_CATS=$(remembrall_extract_category_bytes "$BUDGET_TRANSCRIPT" 2>/dev/null)
+B_CODE=$(printf '%s' "$BUDGET_CATS" | cut -f1)
+B_CONV=$(printf '%s' "$BUDGET_CATS" | cut -f2)
+B_MEM=$(printf '%s' "$BUDGET_CATS" | cut -f3)
+
+if [ "${B_CODE:-0}" -gt 0 ]; then
+  printf "${GREEN}  PASS${RESET} budget: code bytes > 0 ($B_CODE)\n"; PASS=$((PASS+1))
+else
+  printf "${RED}  FAIL${RESET} budget: code bytes > 0\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - budget: code bytes > 0"
+fi
+
+if [ "${B_CONV:-0}" -gt 0 ]; then
+  printf "${GREEN}  PASS${RESET} budget: conversation bytes > 0 ($B_CONV)\n"; PASS=$((PASS+1))
+else
+  printf "${RED}  FAIL${RESET} budget: conversation bytes > 0\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - budget: conversation bytes > 0"
+fi
+
+if [ "${B_MEM:-0}" -gt 0 ]; then
+  printf "${GREEN}  PASS${RESET} budget: memory bytes > 0 ($B_MEM)\n"; PASS=$((PASS+1))
+else
+  printf "${RED}  FAIL${RESET} budget: memory bytes > 0\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - budget: memory bytes > 0"
+fi
+
+# budget-analyze.sh
+echo ""
+echo "Budget: budget-analyze.sh"
+echo "──────────────────────────"
+BUDGET_SESS="test-budget-sess"
+rm -f "/tmp/remembrall-budget/${BUDGET_SESS}.json" 2>/dev/null || true
+remembrall_config_set "budget_enabled" "true" 2>/dev/null
+
+jq -n --arg sid "$BUDGET_SESS" --arg tp "$BUDGET_TRANSCRIPT" '{session_id: $sid, transcript_path: $tp}' | \
+  bash "$PLUGIN_ROOT/hooks/budget-analyze.sh" 2>/dev/null
+
+BUDGET_REPORT="/tmp/remembrall-budget/${BUDGET_SESS}.json"
+if [ -f "$BUDGET_REPORT" ]; then
+  printf "${GREEN}  PASS${RESET} budget analyzer creates report\n"; PASS=$((PASS+1))
+  B_TOTAL_PCT=$(jq -r '.code_pct + .conversation_pct + .memory_pct' "$BUDGET_REPORT" 2>/dev/null) || B_TOTAL_PCT=0
+  # Total should be ~100 (due to rounding it might be 99 or 100)
+  if [ "$B_TOTAL_PCT" -ge 95 ] && [ "$B_TOTAL_PCT" -le 100 ]; then
+    printf "${GREEN}  PASS${RESET} budget percentages sum to ~100 (got $B_TOTAL_PCT)\n"; PASS=$((PASS+1))
+  else
+    printf "${RED}  FAIL${RESET} budget percentages sum to ~100 (got $B_TOTAL_PCT)\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - budget percentages sum to ~100"
+  fi
+  B_HAS_BUDGET=$(jq 'has("budget")' "$BUDGET_REPORT" 2>/dev/null)
+  assert_eq "budget report has budget config" "true" "$B_HAS_BUDGET"
+else
+  printf "${RED}  FAIL${RESET} budget analyzer creates report\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - budget analyzer creates report"
+  printf "${RED}  FAIL${RESET} budget percentages sum to ~100\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - budget percentages sum to ~100"
+  printf "${RED}  FAIL${RESET} budget report has budget config\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - budget report has budget config"
+fi
+
+# Budget disabled
+remembrall_config_set "budget_enabled" "false" 2>/dev/null
+rm -f "/tmp/remembrall-budget/test-budget-disabled.json" 2>/dev/null || true
+jq -n --arg sid "test-budget-disabled" --arg tp "$BUDGET_TRANSCRIPT" '{session_id: $sid, transcript_path: $tp}' | \
+  bash "$PLUGIN_ROOT/hooks/budget-analyze.sh" 2>/dev/null
+if [ ! -f "/tmp/remembrall-budget/test-budget-disabled.json" ]; then
+  printf "${GREEN}  PASS${RESET} budget disabled: no report created\n"; PASS=$((PASS+1))
+else
+  printf "${RED}  FAIL${RESET} budget disabled: no report created\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - budget disabled: no report created"
+fi
+
+# Budget config validation
+remembrall_config_set "budget_enabled" "true" 2>/dev/null && { printf "${GREEN}  PASS${RESET} budget_enabled=true valid\n"; PASS=$((PASS+1)); } || { printf "${RED}  FAIL${RESET} budget_enabled=true valid\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - budget_enabled=true valid"; }
+remembrall_config_set "budget_code" "50" 2>/dev/null && { printf "${GREEN}  PASS${RESET} budget_code=50 valid\n"; PASS=$((PASS+1)); } || { printf "${RED}  FAIL${RESET} budget_code=50 valid\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - budget_code=50 valid"; }
+
+# Cleanup
+rm -f "$BUDGET_REPORT" "/tmp/remembrall-budget/test-budget-disabled.json" 2>/dev/null || true
+rm -f "$HOME/.remembrall/config.json" 2>/dev/null || true
+
+# ── Phase 5: Patrol Integration ───────────────────────────────────
+echo ""
+echo "Patrol Integration: lib.sh functions"
+echo "──────────────────────────────────────"
+
+# remembrall_signal_dir
+SDIR=$(remembrall_signal_dir)
+assert_eq "signal dir is /tmp/remembrall-signals" "/tmp/remembrall-signals" "$SDIR"
+
+# remembrall_check_patrol_signal — no signals
+SIG=$(remembrall_check_patrol_signal "no-signal-sess" 2>/dev/null) || SIG=""
+assert_eq "no signal: returns empty" "" "$SIG"
+
+# Create a signal
+PATROL_SESS="test-patrol-sess"
+PATROL_SIG_DIR="/tmp/remembrall-signals/${PATROL_SESS}"
+mkdir -p "$PATROL_SIG_DIR"
+echo '{"type":"handoff_trigger","reason":"test reason"}' > "$PATROL_SIG_DIR/handoff_trigger.json"
+
+SIG=$(remembrall_check_patrol_signal "$PATROL_SESS" 2>/dev/null) || SIG=""
+assert_eq "signal detected: handoff_trigger" "handoff_trigger" "$SIG"
+
+# remembrall_consume_signal
+PAYLOAD=$(remembrall_consume_signal "$PATROL_SESS" "handoff_trigger" 2>/dev/null) || PAYLOAD=""
+assert_match "consume signal: returns payload" "test reason" "$PAYLOAD"
+
+if [ ! -f "$PATROL_SIG_DIR/handoff_trigger.json" ]; then
+  printf "${GREEN}  PASS${RESET} consume signal: file deleted\n"; PASS=$((PASS+1))
+else
+  printf "${RED}  FAIL${RESET} consume signal: file deleted\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - consume signal: file deleted"
+fi
+
+# TTL expiry — create old signal
+mkdir -p "$PATROL_SIG_DIR"
+echo '{"type":"context_alert","message":"old alert"}' > "$PATROL_SIG_DIR/context_alert.json"
+touch -t 202601010000 "$PATROL_SIG_DIR/context_alert.json" 2>/dev/null || true
+
+SIG_OLD=$(remembrall_check_patrol_signal "$PATROL_SESS" 2>/dev/null) || SIG_OLD=""
+assert_eq "expired signal: returns empty" "" "$SIG_OLD"
+
+if [ ! -f "$PATROL_SIG_DIR/context_alert.json" ]; then
+  printf "${GREEN}  PASS${RESET} expired signal: file cleaned up\n"; PASS=$((PASS+1))
+else
+  printf "${RED}  FAIL${RESET} expired signal: file cleaned up\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - expired signal: file cleaned up"
+fi
+
+# Patrol disabled
+remembrall_config_set "patrol_integration" "false" 2>/dev/null
+mkdir -p "$PATROL_SIG_DIR"
+echo '{"type":"handoff_trigger"}' > "$PATROL_SIG_DIR/handoff_trigger.json"
+SIG_DISABLED=$(remembrall_check_patrol_signal "$PATROL_SESS" 2>/dev/null) || SIG_DISABLED=""
+assert_eq "patrol disabled: no signal returned" "" "$SIG_DISABLED"
+rm -rf "$PATROL_SIG_DIR" 2>/dev/null || true
+remembrall_config_set "patrol_integration" "true" 2>/dev/null
+
+# remembrall_patrol_detected
+echo ""
+echo "Patrol Integration: detection"
+echo "──────────────────────────────"
+# Create a fake patrol installation
+mkdir -p "$HOME/.claude/plugins/cache/cukas/patrol"
+if remembrall_patrol_detected 2>/dev/null; then
+  printf "${GREEN}  PASS${RESET} patrol_detected: finds cached install\n"; PASS=$((PASS+1))
+else
+  printf "${RED}  FAIL${RESET} patrol_detected: finds cached install\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - patrol_detected: finds cached install"
+fi
+rm -rf "$HOME/.claude/plugins/cache/cukas/patrol" 2>/dev/null
+
+# Patrol integration in context-monitor (signal handling)
+echo ""
+echo "Patrol Integration: context-monitor signal handling"
+echo "────────────────────────────────────────────────────"
+# Create handoff_trigger signal
+PATROL_CM_SESS="test-patrol-cm-sess"
+mkdir -p "/tmp/remembrall-signals/${PATROL_CM_SESS}"
+echo '{"type":"handoff_trigger","reason":"Patrol says handoff now"}' > "/tmp/remembrall-signals/${PATROL_CM_SESS}/handoff_trigger.json"
+
+# Need bridge file for context-monitor to work
+CTX_DIR="/tmp/claude-context-pct"
+mkdir -p "$CTX_DIR"
+echo "50" > "$CTX_DIR/$PATROL_CM_SESS"
+
+PATROL_CM_CWD="$TMPDIR_ROOT/patrol-cm-test"
+mkdir -p "$PATROL_CM_CWD"
+
+PATROL_CM_OUTPUT=$(jq -n \
+  --arg sid "$PATROL_CM_SESS" \
+  --arg cwd "$PATROL_CM_CWD" \
+  '{session_id: $sid, cwd: $cwd}' | \
+  bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null) || PATROL_CM_OUTPUT=""
+
+assert_match "patrol signal in context-monitor: mentions Owl Post" "Owl Post" "$PATROL_CM_OUTPUT"
+assert_match "patrol signal in context-monitor: mentions reason" "Patrol says handoff now" "$PATROL_CM_OUTPUT"
+
+# Signal should be consumed
+if [ ! -f "/tmp/remembrall-signals/${PATROL_CM_SESS}/handoff_trigger.json" ]; then
+  printf "${GREEN}  PASS${RESET} patrol signal consumed by context-monitor\n"; PASS=$((PASS+1))
+else
+  printf "${RED}  FAIL${RESET} patrol signal consumed by context-monitor\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - patrol signal consumed by context-monitor"
+fi
+
+# context_alert with skip_timeturner
+echo ""
+echo "Patrol Integration: skip_timeturner"
+echo "─────────────────────────────────────"
+PATROL_TT_SESS="test-patrol-tt-sess"
+mkdir -p "/tmp/remembrall-signals/${PATROL_TT_SESS}"
+echo '{"type":"context_alert","message":"Skip TT for debug","skip_timeturner":true}' > "/tmp/remembrall-signals/${PATROL_TT_SESS}/context_alert.json"
+echo "50" > "$CTX_DIR/$PATROL_TT_SESS"
+
+jq -n --arg sid "$PATROL_TT_SESS" --arg cwd "$PATROL_CM_CWD" '{session_id: $sid, cwd: $cwd}' | \
+  bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null || true
+
+TT_SKIP_FILE="/tmp/remembrall-timeturner/${PATROL_TT_SESS}-skip"
+if [ -f "$TT_SKIP_FILE" ]; then
+  printf "${GREEN}  PASS${RESET} patrol skip_timeturner: skip file created\n"; PASS=$((PASS+1))
+else
+  printf "${RED}  FAIL${RESET} patrol skip_timeturner: skip file created\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - patrol skip_timeturner: skip file created"
+fi
+
+# Patrol config validation
+remembrall_config_set "patrol_integration" "true" 2>/dev/null && { printf "${GREEN}  PASS${RESET} patrol_integration=true valid\n"; PASS=$((PASS+1)); } || { printf "${RED}  FAIL${RESET} patrol_integration=true valid\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - patrol_integration=true valid"; }
+remembrall_config_set "patrol_signal_ttl" "300" 2>/dev/null && { printf "${GREEN}  PASS${RESET} patrol_signal_ttl=300 valid\n"; PASS=$((PASS+1)); } || { printf "${RED}  FAIL${RESET} patrol_signal_ttl=300 valid\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - patrol_signal_ttl=300 valid"; }
+
+# ── Cross-feature: status script includes new sections ────────────
+echo ""
+echo "Cross-feature: remembrall-status.sh"
+echo "─────────────────────────────────────"
+STATUS_CWD="$LINEAGE_CWD"  # Re-use lineage CWD which has data
+STATUS_OUT=$(bash "$PLUGIN_ROOT/scripts/remembrall-status.sh" "$STATUS_CWD" 2>/dev/null)
+assert_match "status shows Lineage" "Lineage:" "$STATUS_OUT"
+assert_match "status shows Insights" "Insights:" "$STATUS_OUT"
+assert_match "status shows Obliviate" "Obliviate:" "$STATUS_OUT"
+assert_match "status shows Budget" "Budget:" "$STATUS_OUT"
+assert_match "status shows Patrol" "Patrol:" "$STATUS_OUT"
+
+# ── Cross-feature: help includes new commands ─────────────────────
+echo ""
+echo "Cross-feature: remembrall-help.md"
+echo "───────────────────────────────────"
+HELP_CONTENT=$(cat "$PLUGIN_ROOT/commands/remembrall-help.md")
+assert_match "help lists /lineage" "/lineage" "$HELP_CONTENT"
+assert_match "help lists /insights" "/insights" "$HELP_CONTENT"
+assert_match "help lists /obliviate" "/obliviate" "$HELP_CONTENT"
+assert_match "help lists /budget" "/budget" "$HELP_CONTENT"
+assert_match "help lists patrol_integration config" "patrol_integration" "$HELP_CONTENT"
+assert_match "help lists lineage config" "lineage.*true" "$HELP_CONTENT"
+assert_match "help lists budget_enabled config" "budget_enabled.*false" "$HELP_CONTENT"
+
+# ── Cross-feature: map includes budget section ────────────────────
+echo ""
+echo "Cross-feature: remembrall-map.sh with budget"
+echo "───────────────────────────────────────────────"
+MAP_BUDGET_SESS="test-map-budget-sess"
+mkdir -p "/tmp/remembrall-budget"
+# Write a budget report
+jq -n '{code_pct: 55, conversation_pct: 30, memory_pct: 15, budget: {code: 50, conversation: 30, memory: 20}, warnings: []}' \
+  > "/tmp/remembrall-budget/${MAP_BUDGET_SESS}.json"
+# Fake the session ID for map
+mkdir -p "/tmp/remembrall-sessions"
+MAP_BUDGET_CWD="$TMPDIR_ROOT/map-budget-test"
+mkdir -p "$MAP_BUDGET_CWD"
+_map_hash=$(remembrall_md5 "$MAP_BUDGET_CWD" 2>/dev/null)
+echo "$MAP_BUDGET_SESS" > "/tmp/remembrall-sessions/$_map_hash"
+echo "50" > "$CTX_DIR/$MAP_BUDGET_SESS"
+
+MAP_OUTPUT=$(bash "$PLUGIN_ROOT/scripts/remembrall-map.sh" "$MAP_BUDGET_CWD" 2>/dev/null)
+assert_match "map shows budget section" "Budget.*code.*55%" "$MAP_OUTPUT"
+
+# Cleanup all patrol/budget test files
+rm -f "$CTX_DIR/$PATROL_CM_SESS" "$CTX_DIR/$PATROL_TT_SESS" "$CTX_DIR/$MAP_BUDGET_SESS"
+rm -f "/tmp/remembrall-nudges/$PATROL_CM_SESS" "/tmp/remembrall-nudges/$PATROL_TT_SESS"
+rm -rf "/tmp/remembrall-signals/$PATROL_CM_SESS" "/tmp/remembrall-signals/$PATROL_TT_SESS"
+rm -f "$TT_SKIP_FILE" 2>/dev/null
+rm -f "/tmp/remembrall-budget/$BUDGET_SESS" "/tmp/remembrall-budget/test-budget-disabled.json" "/tmp/remembrall-budget/$MAP_BUDGET_SESS.json"
+rm -f "/tmp/remembrall-sessions/$_map_hash" 2>/dev/null
+rm -f "$HOME/.remembrall/config.json" 2>/dev/null || true
 
 # ═══════════════════════════════════════════════════════════════════
 echo ""

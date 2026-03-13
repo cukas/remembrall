@@ -107,11 +107,30 @@ remembrall_find_bridge() {
 }
 
 # Compute handoff directory for a given CWD
+# Uses project basename + short hash suffix for readability + collision safety
+# e.g., ~/.remembrall/handoffs/ai-buddies-8f9a0596/
+# Falls back to legacy full-hash format (~/.remembrall/handoffs/{md5}) for v2.x compat
 remembrall_handoff_dir() {
   local cwd="$1"
-  local hash
-  hash=$(remembrall_md5 "$cwd") || return 1
-  echo "$HOME/.remembrall/handoffs/$hash"
+  local full_hash
+  full_hash=$(remembrall_md5 "$cwd") || return 1
+  # v3 format: name-shortHash
+  local project_name
+  project_name=$(basename "$cwd")
+  project_name=$(printf '%s' "$project_name" | tr '[:upper:]' '[:lower:]' | sed 's/^\.*//' | sed 's/[^a-z0-9_-]/-/g' | sed 's/--*/-/g' | sed 's/^-//;s/-$//')
+  [ -z "$project_name" ] && project_name="default"
+  local short_hash
+  short_hash=$(printf '%s' "$full_hash" | cut -c1-8)
+  local new_dir="$HOME/.remembrall/handoffs/${project_name}-${short_hash}"
+  local old_dir="$HOME/.remembrall/handoffs/${full_hash}"
+  # Prefer new format; fall back to legacy if it exists and new doesn't
+  if [ -d "$new_dir" ]; then
+    echo "$new_dir"
+  elif [ -d "$old_dir" ]; then
+    echo "$old_dir"
+  else
+    echo "$new_dir"
+  fi
 }
 
 # Cross-platform file age in seconds (returns 0 on stat failure)
@@ -406,9 +425,9 @@ remembrall_locked_cal_update() {
 
   if command -v flock >/dev/null 2>&1; then
     (
-      flock -x -w 5 200 || { rm -f "$tmp"; return 1; }
+      flock -x -w 5 9 || { rm -f "$tmp"; return 1; }
       jq "$@" "$cal_file" > "$tmp" 2>/dev/null && mv "$tmp" "$cal_file" || rm -f "$tmp"
-    ) 200>"$lock_file"
+    ) 9>"$lock_file"
   else
     # mkdir is atomic on POSIX — use as spinlock with timeout
     local attempts=0
@@ -936,19 +955,31 @@ remembrall_config_validate() {
         return 1
       fi
       ;;
-    max_transcript_kb|recency_window)
+    max_transcript_kb|recency_window|pensieve_max_sessions|pensieve_inject_budget)
       if ! [[ "$value" =~ ^[0-9]+$ ]] || [ "$value" -eq 0 ]; then
         echo "remembrall: invalid $key '$value' — must be a positive integer" >&2
         return 1
       fi
       ;;
-    autonomous_mode|git_integration|team_handoffs|easter_eggs|debug)
+    time_turner_max_budget_usd)
+      if ! [[ "$value" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+        echo "remembrall: invalid $key '$value' — must be a positive number" >&2
+        return 1
+      fi
+      ;;
+    time_turner_model)
+      case "$value" in
+        sonnet|opus|haiku) ;;
+        *) echo "remembrall: invalid $key '$value' — must be sonnet, opus, or haiku" >&2; return 1 ;;
+      esac
+      ;;
+    autonomous_mode|git_integration|team_handoffs|easter_eggs|debug|pensieve|time_turner)
       if [ "$value" != "true" ] && [ "$value" != "false" ]; then
         echo "remembrall: invalid $key '$value' — must be true or false" >&2
         return 1
       fi
       ;;
-    threshold_journal|threshold_warning|threshold_urgent)
+    threshold_journal|threshold_warning|threshold_urgent|threshold_timeturner)
       if ! [[ "$value" =~ ^[0-9]+$ ]] || [ "$value" -eq 0 ] || [ "$value" -ge 100 ]; then
         echo "remembrall: invalid $key '$value' — must be an integer between 1 and 99" >&2
         return 1
@@ -1027,11 +1058,26 @@ remembrall_git_enabled() {
 }
 
 # Compute patches directory for a project
+# Falls back to legacy full-hash format for v2.x compat
 remembrall_patches_dir() {
   local cwd="$1"
-  local hash
-  hash=$(remembrall_md5 "$cwd") || return 1
-  echo "$HOME/.remembrall/patches/$hash"
+  local full_hash
+  full_hash=$(remembrall_md5 "$cwd") || return 1
+  local project_name
+  project_name=$(basename "$cwd")
+  project_name=$(printf '%s' "$project_name" | tr '[:upper:]' '[:lower:]' | sed 's/^\.*//' | sed 's/[^a-z0-9_-]/-/g' | sed 's/--*/-/g' | sed 's/^-//;s/-$//')
+  [ -z "$project_name" ] && project_name="default"
+  local short_hash
+  short_hash=$(printf '%s' "$full_hash" | cut -c1-8)
+  local new_dir="$HOME/.remembrall/patches/${project_name}-${short_hash}"
+  local old_dir="$HOME/.remembrall/patches/${full_hash}"
+  if [ -d "$new_dir" ]; then
+    echo "$new_dir"
+  elif [ -d "$old_dir" ]; then
+    echo "$old_dir"
+  else
+    echo "$new_dir"
+  fi
 }
 
 # ─── Team Handoffs ────────────────────────────────────────────────
@@ -1055,10 +1101,11 @@ remembrall_retention_hours() {
   fi
 }
 
-# Compute team handoff directory (project-local)
+# Compute team handoff directory — same as personal (all centralized)
+# Team handoffs are distinguished by metadata, not location
 remembrall_team_handoff_dir() {
   local cwd="$1"
-  echo "$cwd/.remembrall/handoffs"
+  remembrall_handoff_dir "$cwd"
 }
 
 # ─── Session ID Publishing ────────────────────────────────────────
@@ -1199,6 +1246,30 @@ remembrall_previous_session() {
   echo "$newest"
 }
 
+# ─── Pensieve Directory ──────────────────────────────────────────
+
+# Compute Pensieve persistence directory for a given CWD
+# Mirrors remembrall_handoff_dir() pattern for consistency
+# e.g., ~/.remembrall/pensieve/ai-buddies-8f9a0596/
+remembrall_pensieve_dir() {
+  local cwd="$1"
+  local full_hash
+  full_hash=$(remembrall_md5 "$cwd") || return 1
+  local project_name
+  project_name=$(basename "$cwd")
+  project_name=$(printf '%s' "$project_name" | tr '[:upper:]' '[:lower:]' | sed 's/^\.*//' | sed 's/[^a-z0-9_-]/-/g' | sed 's/--*/-/g' | sed 's/^-//;s/-$//')
+  [ -z "$project_name" ] && project_name="default"
+  local short_hash
+  short_hash=$(printf '%s' "$full_hash" | cut -c1-8)
+  echo "$HOME/.remembrall/pensieve/${project_name}-${short_hash}"
+}
+
+# Pensieve temp directory for raw JSONL tracking data
+# e.g., /tmp/remembrall-pensieve/
+remembrall_pensieve_tmp() {
+  echo "/tmp/remembrall-pensieve"
+}
+
 # ─── Frontmatter ──────────────────────────────────────────────────
 
 # Parse frontmatter value from a handoff file.
@@ -1224,4 +1295,399 @@ remembrall_frontmatter_get() {
   # Use `|| true` to ensure non-zero exit from grep (no match) doesn't propagate
   # when caller has set -euo pipefail
   printf '%s\n' "$block" | grep "^${key}:" | sed "s/^${key}: *//" | head -1 || true
+}
+
+# ─── Session Lineage (v3.0.0) ──────────────────────────────────
+
+# Lineage storage directory per project
+# Usage: remembrall_lineage_dir "/path/to/project"
+remembrall_lineage_dir() {
+  local cwd="${1:-.}"
+  local hash
+  hash=$(remembrall_md5 "$cwd" | cut -c1-8)
+  local name
+  name=$(basename "$cwd")
+  [ "$name" = "." ] && name="default"
+  echo "$HOME/.remembrall/lineage/${name}-${hash}"
+}
+
+# Record a session in the lineage index (atomic JSON append)
+# Usage: remembrall_lineage_record session_id parent_id cwd type status goal files_count
+remembrall_lineage_record() {
+  local session_id="$1"
+  local parent_id="${2:-}"
+  local cwd="${3:-.}"
+  local type="${4:-normal}"
+  local status="${5:-active}"
+  local goal="${6:-}"
+  local files_count="${7:-0}"
+
+  [ "$(remembrall_config "lineage" "true")" = "true" ] || return 0
+
+  local dir
+  dir=$(remembrall_lineage_dir "$cwd")
+  mkdir -p "$dir"
+
+  local index="$dir/index.json"
+  local max_entries
+  max_entries=$(remembrall_config "lineage_max_entries" "50")
+  local now
+  now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+  local entry
+  entry=$(jq -n \
+    --arg sid "$session_id" \
+    --arg pid "$parent_id" \
+    --arg type "$type" \
+    --arg status "$status" \
+    --arg goal "$goal" \
+    --argjson files "$files_count" \
+    --arg ts "$now" \
+    '{session_id: $sid, parent_id: $pid, type: $type, status: $status, goal: $goal, files_touched: $files, timestamp: $ts}')
+
+  if [ -f "$index" ]; then
+    # Update existing entry or append
+    local exists
+    exists=$(jq --arg sid "$session_id" '[.sessions[] | select(.session_id == $sid)] | length' "$index" 2>/dev/null) || exists=0
+    local tmp
+    tmp=$(mktemp "${index}.XXXXXX")
+    if [ "$exists" -gt 0 ]; then
+      jq --argjson entry "$entry" '
+        .sessions = [.sessions[] | if .session_id == ($entry.session_id) then $entry else . end]
+      ' "$index" > "$tmp" 2>/dev/null
+    else
+      jq --argjson entry "$entry" --argjson max "$max_entries" '
+        .sessions += [$entry] | .sessions = .sessions[-$max:]
+      ' "$index" > "$tmp" 2>/dev/null
+    fi
+    if [ -s "$tmp" ]; then
+      mv "$tmp" "$index"
+    else
+      rm -f "$tmp"
+    fi
+  else
+    printf '{"sessions":[%s]}' "$entry" | jq '.' > "$index" 2>/dev/null
+  fi
+}
+
+# Walk parent chain to compute depth
+# Usage: remembrall_lineage_depth cwd session_id
+remembrall_lineage_depth() {
+  local cwd="${1:-.}"
+  local session_id="$2"
+
+  local dir
+  dir=$(remembrall_lineage_dir "$cwd")
+  local index="$dir/index.json"
+  [ -f "$index" ] || { echo "0"; return; }
+
+  local depth=0
+  local current="$session_id"
+  while [ -n "$current" ] && [ "$depth" -lt 100 ]; do
+    local parent
+    parent=$(jq -r --arg sid "$current" '.sessions[] | select(.session_id == $sid) | .parent_id // empty' "$index" 2>/dev/null)
+    if [ -z "$parent" ]; then
+      break
+    fi
+    depth=$((depth + 1))
+    current="$parent"
+  done
+  echo "$depth"
+}
+
+# Count sessions sharing the same parent (branches/forks)
+# Usage: remembrall_lineage_branches cwd
+remembrall_lineage_branches() {
+  local cwd="${1:-.}"
+
+  local dir
+  dir=$(remembrall_lineage_dir "$cwd")
+  local index="$dir/index.json"
+  [ -f "$index" ] || { echo "0"; return; }
+
+  jq '[.sessions[] | select(.parent_id != "" and .parent_id != null) | .parent_id] | group_by(.) | map(select(length > 1)) | length' "$index" 2>/dev/null || echo "0"
+}
+
+# ─── Ambient Learning / Insights (v3.0.0) ───────────────────────
+
+# Insights storage directory per project
+# Usage: remembrall_insights_dir "/path/to/project"
+remembrall_insights_dir() {
+  local cwd="${1:-.}"
+  local hash
+  hash=$(remembrall_md5 "$cwd" | cut -c1-8)
+  local name
+  name=$(basename "$cwd")
+  [ "$name" = "." ] && name="default"
+  echo "$HOME/.remembrall/insights/${name}-${hash}"
+}
+
+# Check if insights are fresh (< 1 hour old)
+# Usage: remembrall_insights_fresh "/path/to/project"
+remembrall_insights_fresh() {
+  local cwd="${1:-.}"
+  local dir
+  dir=$(remembrall_insights_dir "$cwd")
+  local insights_file="$dir/insights.json"
+  [ -f "$insights_file" ] || return 1
+  local age
+  age=$(remembrall_file_age "$insights_file")
+  [ "$age" -lt 3600 ]
+}
+
+# ─── Obliviate / Semantic Context Pruning (v3.0.0) ──────────────
+
+# Glob all memory directories
+# Usage: remembrall_memory_dirs
+remembrall_memory_dirs() {
+  local dirs=()
+  for d in "$HOME"/.claude/projects/*/memory/; do
+    [ -d "$d" ] && dirs+=("$d")
+  done
+  printf '%s\n' "${dirs[@]}"
+}
+
+# Obliviate temp directory
+# Usage: remembrall_obliviate_dir
+remembrall_obliviate_dir() {
+  echo "/tmp/remembrall-obliviate"
+}
+
+# Analyze memory staleness by cross-referencing with Pensieve data
+# Usage: remembrall_analyze_memory_staleness cwd pensieve_dir
+# Returns JSON: [{file, stale, reason, last_referenced}]
+remembrall_analyze_memory_staleness() {
+  local cwd="${1:-.}"
+  local pensieve_dir="${2:-}"
+
+  # Find memory dir: try multiple path formats
+  # Claude Code uses: ~/.claude/projects/-Users-name-project/memory/
+  local memory_dir=""
+  local project_hash
+  project_hash=$(printf '%s' "$cwd" | sed 's|/|-|g; s|^-||')
+  # Try: exact match, dash-prefixed, Claude's format
+  for _candidate in \
+    "$HOME/.claude/projects/${project_hash}/memory" \
+    "$HOME/.claude/projects/-${project_hash}/memory"; do
+    if [ -d "$_candidate" ]; then
+      memory_dir="$_candidate"
+      break
+    fi
+  done
+
+  [ -n "$memory_dir" ] && [ -d "$memory_dir" ] || { echo "[]"; return; }
+
+  local stale_sessions
+  stale_sessions=$(remembrall_config "obliviate_stale_sessions" "5")
+
+  local results="[]"
+  for mem_file in "$memory_dir"/*.md; do
+    [ -f "$mem_file" ] || continue
+    local basename_f
+    basename_f=$(basename "$mem_file")
+    [ "$basename_f" = "MEMORY.md" ] && continue
+
+    local age_hours
+    age_hours=$(( $(remembrall_file_age "$mem_file") / 3600 ))
+    local stale=false
+    local reason=""
+
+    # Stale if not modified in stale_sessions worth of time (approx 1 session = 2h)
+    local stale_hours
+    stale_hours=$(( stale_sessions * 2 ))
+    if [ "$age_hours" -gt "$stale_hours" ]; then
+      stale=true
+      reason="Not updated in ${age_hours}h (threshold: ${stale_hours}h)"
+    fi
+
+    # Check Pensieve for recent references (reduces staleness)
+    if [ "$stale" = true ] && [ -n "$pensieve_dir" ] && [ -d "$pensieve_dir" ]; then
+      local referenced
+      referenced=$(jq -r '.files | keys[]' "$pensieve_dir"/session-*.json 2>/dev/null | { grep -cF "$basename_f" || echo 0; }) || referenced=0
+      if [ "$referenced" -gt 0 ]; then
+        stale=false
+        reason="Referenced in $referenced Pensieve session(s) — not stale"
+      fi
+    fi
+
+    results=$(echo "$results" | jq --arg file "$basename_f" --arg path "$mem_file" \
+      --argjson stale "$stale" --arg reason "$reason" --argjson age "$age_hours" \
+      '. += [{"file": $file, "path": $path, "stale": $stale, "reason": $reason, "age_hours": $age}]')
+  done
+
+  echo "$results"
+}
+
+# ─── Context Budget Allocation (v3.0.0) ─────────────────────────
+
+# Budget temp directory
+# Usage: remembrall_budget_dir
+remembrall_budget_dir() {
+  echo "/tmp/remembrall-budget"
+}
+
+# Categorize transcript content into code/conversation/memory bytes
+# Usage: remembrall_extract_category_bytes transcript_path
+# Output: code_bytes\tconversation_bytes\tmemory_bytes
+remembrall_extract_category_bytes() {
+  local transcript="$1"
+  [ -f "$transcript" ] || { printf '0\t0\t0'; return; }
+
+  jq -r '
+    def str_bytes: (. // "") | tostring | length;
+    reduce .[] as $row (
+      {code: 0, conversation: 0, memory: 0};
+      if $row.type == "assistant" then
+        reduce ($row.content // [])[] as $c (.;
+          if $c.type == "tool_use" or $c.type == "tool_result" then
+            .code += ($c | tostring | length)
+          elif $c.type == "text" then
+            .conversation += ($c.text | str_bytes)
+          else .
+          end
+        )
+      elif $row.type == "user" then
+        reduce ($row.content // [])[] as $c (.;
+          if $c.type == "tool_result" then
+            .code += ($c | tostring | length)
+          elif $c.type == "text" then
+            if ($c.text // "" | test("REMEMBRALL|additionalContext|hookSpecificOutput")) then
+              .memory += ($c.text | str_bytes)
+            else
+              .conversation += ($c.text | str_bytes)
+            end
+          else .
+          end
+        )
+      elif $row.type == "system" then
+        .memory += ($row | tostring | length)
+      else .
+      end
+    ) | [.code, .conversation, .memory] | map(tostring) | join("\t")
+  ' "$transcript" 2>/dev/null || printf '0\t0\t0'
+}
+
+# Check budget allocation vs configured limits
+# Usage: remembrall_budget_check session_id
+# Output: JSON with actuals, configured, and warnings
+remembrall_budget_check() {
+  local session_id="$1"
+  local budget_dir
+  budget_dir=$(remembrall_budget_dir)
+  local budget_file="$budget_dir/${session_id}.json"
+  [ -f "$budget_file" ] || { echo "{}"; return; }
+
+  local code_pct conversation_pct memory_pct
+  code_pct=$(jq -r '.code_pct // 0' "$budget_file" 2>/dev/null)
+  conversation_pct=$(jq -r '.conversation_pct // 0' "$budget_file" 2>/dev/null)
+  memory_pct=$(jq -r '.memory_pct // 0' "$budget_file" 2>/dev/null)
+
+  local cfg_code cfg_conv cfg_mem
+  cfg_code=$(remembrall_config "budget_code" "50")
+  cfg_conv=$(remembrall_config "budget_conversation" "30")
+  cfg_mem=$(remembrall_config "budget_memory" "20")
+
+  local warnings="[]"
+  # Warn if any category exceeds its budget by >10 percentage points
+  # Use integer shell arithmetic (values from jq are already integers)
+  local _code_diff=$(( ${code_pct%%.*} - ${cfg_code%%.*} ))
+  local _conv_diff=$(( ${conversation_pct%%.*} - ${cfg_conv%%.*} ))
+  local _mem_diff=$(( ${memory_pct%%.*} - ${cfg_mem%%.*} ))
+  if [ "$_code_diff" -gt 10 ]; then
+    warnings=$(echo "$warnings" | jq '. += ["code over budget"]')
+  fi
+  if [ "$_conv_diff" -gt 10 ]; then
+    warnings=$(echo "$warnings" | jq '. += ["conversation over budget"]')
+  fi
+  if [ "$_mem_diff" -gt 10 ]; then
+    warnings=$(echo "$warnings" | jq '. += ["memory over budget"]')
+  fi
+
+  jq -n \
+    --argjson code_pct "$code_pct" \
+    --argjson conv_pct "$conversation_pct" \
+    --argjson mem_pct "$memory_pct" \
+    --argjson cfg_code "$cfg_code" \
+    --argjson cfg_conv "$cfg_conv" \
+    --argjson cfg_mem "$cfg_mem" \
+    --argjson warnings "$warnings" \
+    '{actual: {code: $code_pct, conversation: $conv_pct, memory: $mem_pct}, configured: {code: $cfg_code, conversation: $cfg_conv, memory: $cfg_mem}, warnings: $warnings}'
+}
+
+# Validate budget percentages sum to 100
+# Usage: remembrall_budget_validate_total
+# Returns 0 if valid, 1 if not
+remembrall_budget_validate_total() {
+  local code conv mem
+  code=$(remembrall_config "budget_code" "50")
+  conv=$(remembrall_config "budget_conversation" "30")
+  mem=$(remembrall_config "budget_memory" "20")
+  local total=$((code + conv + mem))
+  [ "$total" -eq 100 ]
+}
+
+# ─── Patrol Integration (v3.0.0) ────────────────────────────────
+
+# Signal directory for Patrol ↔ Remembrall communication
+# Usage: remembrall_signal_dir
+remembrall_signal_dir() {
+  echo "/tmp/remembrall-signals"
+}
+
+# Check for Patrol signal files
+# Usage: remembrall_check_patrol_signal session_id
+# Returns signal type or empty
+remembrall_check_patrol_signal() {
+  local session_id="$1"
+  [ "$(remembrall_config "patrol_integration" "true")" = "true" ] || return 0
+
+  local signal_dir
+  signal_dir="$(remembrall_signal_dir)/${session_id}"
+  [ -d "$signal_dir" ] || return 0
+
+  local ttl
+  ttl=$(remembrall_config "patrol_signal_ttl" "300")
+
+  for signal_file in "$signal_dir"/*.json; do
+    [ -f "$signal_file" ] || continue
+    local age
+    age=$(remembrall_file_age "$signal_file")
+    if [ "$age" -lt "$ttl" ]; then
+      local signal_type
+      signal_type=$(basename "$signal_file" .json)
+      echo "$signal_type"
+      return 0
+    else
+      # Expired — clean up
+      rm -f "$signal_file"
+    fi
+  done
+}
+
+# Read and consume a signal file (read payload, delete file)
+# Usage: remembrall_consume_signal session_id signal_type
+# Returns signal payload JSON
+remembrall_consume_signal() {
+  local session_id="$1"
+  local signal_type="$2"
+  local signal_dir
+  signal_dir="$(remembrall_signal_dir)/${session_id}"
+  local signal_file="$signal_dir/${signal_type}.json"
+
+  if [ -f "$signal_file" ]; then
+    cat "$signal_file"
+    rm -f "$signal_file"
+    # Clean up empty dir
+    rmdir "$signal_dir" 2>/dev/null || true
+  fi
+}
+
+# Check if Patrol is installed (for status display)
+# Usage: remembrall_patrol_detected
+remembrall_patrol_detected() {
+  # Check common Patrol installation paths
+  [ -d "$HOME/.claude/plugins/cache/cukas/patrol" ] && return 0
+  [ -d "$HOME/.claude/plugins/patrol" ] && return 0
+  command -v patrol >/dev/null 2>&1 && return 0
+  return 1
 }

@@ -4,6 +4,108 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [3.0.0] - 2026-03-13 — "The Session Never Dies"
+
+### Added
+- **The Pensieve** — Compaction-proof session intelligence. Tracks every file read/edit, command, and error throughout a session into structured JSONL. On compaction or handoff, distills into a summary that gets injected into the next session. Claude retains structured knowledge of what it did, even across compactions and session resets. On by default (`pensieve: true`)
+  - `hooks/pensieve-track.sh` — Background incremental transcript parser (runs on every prompt)
+  - `hooks/pensieve-distill.sh` — Crunches raw JSONL into structured summary JSON
+  - `hooks/pensieve-inject.sh` — Generates compact text for additionalContext (budget-capped)
+  - Persisted to `~/.remembrall/pensieve/{project-hash}/`
+  - Config: `pensieve`, `pensieve_max_sessions` (default 3), `pensieve_inject_budget` (default 2000)
+
+- **Time-Turner** — Parallel agent at low context. At a configurable threshold (default 30%), spawns a headless `claude -p` agent in a git worktree with remaining tasks. The agent works independently while the main session compacts. On next resume, offers to merge changes. Opt-in only (`time_turner: false` by default)
+  - `hooks/time-turner-spawn.sh` — Creates worktree, builds prompt, spawns `claude -p`
+  - `hooks/time-turner-check.sh` — Checks status, formats report for injection
+  - `/timeturner` skill — `status`, `diff`, `merge`, `cancel` sub-commands
+  - Safety: opt-in, budget-capped (`--max-budget-usd`), worktree-isolated, never auto-merges
+  - Auto-cleanup: stale worktrees >24h removed on SessionStart
+  - Config: `time_turner`, `time_turner_model` (default sonnet), `time_turner_max_budget_usd` (default 1.00), `threshold_timeturner` (default 30)
+
+- **The Marauder's Map** — `/map` command for visual session overview. Shows context gauge, files explored with R/E tags, commands with colored exit codes, error counts, burn rate, and Time-Turner status. Built from Pensieve data + bridge + growth tracking
+  - `scripts/remembrall-map.sh` — Terminal visualization
+  - `commands/map.md` — Command definition
+
+- **`/pensieve` skill** — Browse and search Pensieve session memories. List sessions, view summaries, search across session history
+
+- **Session Lineage (Marauder's Map — Session Ancestry)** — Full session DAG tracking. Every session (main, compacted, Time-Turner) is recorded in a lineage index with parent/child relationships. Renders as a text DAG showing session ancestry, branches, and merge status
+  - `hooks/lineage-record.sh` — Records session in lineage index (called by precompact + handoff-create)
+  - `scripts/remembrall-lineage.sh` — Renders text DAG with depth, branch counts, and HP theming
+  - `commands/lineage.md` — `/lineage` command
+  - Library: `remembrall_lineage_dir()`, `remembrall_lineage_record()`, `remembrall_lineage_depth()`, `remembrall_lineage_branches()`
+  - Storage: `~/.remembrall/lineage/{project-hash}/index.json`
+  - Config: `lineage` (default true), `lineage_max_entries` (default 50)
+  - HP theme: branches = "Horcrux detected"
+
+- **Ambient Learning / Insights (The Pensieve Remembers)** — Aggregates Pensieve session data into actionable patterns. Tracks file hotspots, workflow patterns (test-before-commit), error recurrence, and session statistics. Background aggregation on SessionStart
+  - `hooks/insights-aggregate.sh` — Aggregates Pensieve sessions into patterns (background)
+  - `scripts/remembrall-insights.sh` — Renders formatted insights with HP theming
+  - `commands/insights.md` — `/insights` command
+  - Library: `remembrall_insights_dir()`, `remembrall_insights_fresh()`
+  - Storage: `~/.remembrall/insights/{project-hash}/insights.json`
+  - Config: `insights` (default true), `insights_inject` (default false), `insights_min_sessions` (default 3)
+
+- **Semantic Context Pruning / Obliviate** — Memory staleness analyzer that cross-references memory files with Pensieve data. Identifies stale memories not accessed in recent sessions and offers guided pruning with user confirmation. Archives stale memories instead of deleting
+  - `hooks/obliviate-analyze.sh` — Memory staleness analyzer (background, at journal threshold)
+  - `scripts/obliviate-archive.sh` — Moves stale memories to `.archive/`
+  - `commands/obliviate.md` — `/obliviate` command
+  - `skills/obliviate/SKILL.md` — Guided pruning skill with user confirmation
+  - Library: `remembrall_memory_dirs()`, `remembrall_obliviate_dir()`, `remembrall_analyze_memory_staleness()`
+  - Tmp: `/tmp/remembrall-obliviate/{session_id}.json`
+  - Config: `obliviate` (default true), `obliviate_stale_sessions` (default 5)
+  - HP theme: "Obliviate! N stale memories banished to the archive."
+
+- **Context Budget Allocation (The Sorting Hat)** — Transcript category breakdown that classifies context consumption into code, conversation, and memory. Compares actuals vs configured budgets and warns when categories are imbalanced. Opt-in
+  - `hooks/budget-analyze.sh` — Transcript category breakdown (background)
+  - `commands/budget.md` — `/budget` command
+  - Library: `remembrall_budget_dir()`, `remembrall_extract_category_bytes()`, `remembrall_budget_check()`, `remembrall_budget_validate_total()`
+  - Tmp: `/tmp/remembrall-budget/{session_id}.json`
+  - Config: `budget_enabled` (default false), `budget_code` (default 50), `budget_conversation` (default 30), `budget_memory` (default 20)
+  - HP theme: "The Sorting Hat detects an imbalance!"
+
+- **Patrol Integration (Owl Post)** — File-based signal protocol for Patrol plugin interop. Patrol is fully optional — zero behavior change when not installed. Signal types: `handoff_trigger`, `context_alert`. Patrol writes signal files, Remembrall reads and consumes them
+  - `docs/patrol-integration.md` — Signal protocol spec (the contract)
+  - Library: `remembrall_signal_dir()`, `remembrall_check_patrol_signal()`, `remembrall_consume_signal()`, `remembrall_patrol_detected()`
+  - Tmp: `/tmp/remembrall-signals/{session_id}/`
+  - Config: `patrol_integration` (default true), `patrol_signal_ttl` (default 300)
+  - HP theme: "Owl Post" / "Ministry of Magic: Patrol (connected)"
+
+- Config validation for all new settings (12 new config keys total)
+- `remembrall_pensieve_dir()` and `remembrall_pensieve_tmp()` library functions
+- Pensieve, Lineage, Insights, Obliviate, Budget, and Patrol data in `remembrall-status.sh` diagnostic output
+- Time-Turner status in `remembrall-status.sh` diagnostic output
+- All new feature cleanup in `remembrall-uninstall.sh`
+- Session Intelligence (Pensieve) section appended to handoff files
+- 351 total tests (135+ new tests covering all 5 features)
+
+### Changed
+- Handoff files now include `## Session Intelligence (Pensieve)` section with distilled session data
+- Session-resume injects Pensieve memory on ALL session starts (fresh + compact + clear)
+- Session-resume spawns insights aggregation in background
+- Context-monitor checks for Patrol signals before threshold comparison
+- Context-monitor spawns obliviate analyzer at journal threshold
+- Context-monitor spawns budget analyzer below journal threshold
+- Context thresholds diagram updated: shows Time-Turner trigger at 30%
+- Help tables updated with all new commands, skills, and config options
+- Marauder's Map (`/map`) shows budget section when budget is enabled
+
+## [2.8.0] - 2026-03-12
+
+### Fixed
+- **zsh parse error in lib.sh** — `200>"$lock_file"` fd redirect was valid bash but invalid in zsh. Changed to `9>"$lock_file"` which works in both shells. This caused cascading "command not found" errors for all functions defined after line 411 (including `remembrall_team_handoff_dir`), breaking `/replay` entirely
+- **`/replay` sources lib.sh in zsh** — Claude Code's Bash tool uses the user's default shell (zsh on macOS). The skill's `source lib.sh` now works correctly since the fd redirect is zsh-compatible
+
+### Changed
+- **Handoff dirs use project names, not MD5 hashes** — `~/.remembrall/handoffs/ai-buddies-8f9a0596/` instead of `~/.remembrall/handoffs/9d4b645d573f0ad5cee8333beffd1fb4/`. Human-readable, easy to find. 8-char hash suffix (32 bits) prevents collisions when two projects have the same folder name
+- **All handoffs centralized in `~/.remembrall/`** — team handoffs no longer written to `$CWD/.remembrall/handoffs/` (polluted git repos). Team flag preserved in frontmatter metadata only
+- **Autonomous context management** — nudges and blocks no longer tell the user to type `/clear` then `/replay`. Instead, Claude enters plan mode autonomously and the session-resume hook auto-injects the handoff after context clears
+- **Handoff skill stops saying "you can /clear"** — after saving, Claude enters plan mode if context is low, or just continues if context is fine
+- **Stop hook no longer suggests /clear + /replay** — confirms auto-resume instead
+- **Plugin root published at session start** — `/replay` no longer picks up stale version from previous session
+
+### Added
+- **Session Autopilot** — When autonomous mode is on (`/autonomous`), context limits become invisible. Remembrall saves handoffs as safety nets and keeps working. When compaction happens, the session auto-resumes and continues immediately — no user click, no "ready to continue?". The 200K token limit becomes unlimited. Enable with `/autonomous` for overnight runs, large refactors, or unattended work
+
 ## [2.7.1] - 2026-03-12
 
 ### Fixed

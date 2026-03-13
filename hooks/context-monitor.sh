@@ -25,6 +25,66 @@ remembrall_publish_session_id "$CWD" "$SESSION_ID"
 # Persist plugin root so skills/commands can find scripts without CLAUDE_PLUGIN_ROOT
 remembrall_publish_plugin_root
 
+# ── Pensieve: background incremental transcript tracking ──────────
+if [ "$(remembrall_config "pensieve" "true")" = "true" ] && [ -n "$TRANSCRIPT_PATH" ] && [ -f "$TRANSCRIPT_PATH" ]; then
+  (echo "$INPUT" | "$SCRIPT_DIR/pensieve-track.sh" >/dev/null 2>&1) &
+fi
+
+# ── Patrol: check for signal files before threshold logic ─────────
+PATROL_SIGNAL=""
+if [ "$(remembrall_config "patrol_integration" "true")" = "true" ] && [ -n "$SESSION_ID" ]; then
+  PATROL_SIGNAL=$(remembrall_check_patrol_signal "$SESSION_ID" 2>/dev/null) || PATROL_SIGNAL=""
+  if [ -n "$PATROL_SIGNAL" ]; then
+    SIGNAL_PAYLOAD=$(remembrall_consume_signal "$SESSION_ID" "$PATROL_SIGNAL" 2>/dev/null) || SIGNAL_PAYLOAD=""
+    if [ "$PATROL_SIGNAL" = "handoff_trigger" ]; then
+      remembrall_debug "patrol signal: handoff_trigger"
+      # Create preemptive handoff (same as warning threshold behavior)
+      if [ -n "$TRANSCRIPT_PATH" ] && [ -f "$TRANSCRIPT_PATH" ]; then
+        (
+          jq -n \
+            --arg trigger "patrol_signal" \
+            --arg session_id "$SESSION_ID" \
+            --arg cwd "$CWD" \
+            --arg transcript_path "$TRANSCRIPT_PATH" \
+            '{trigger: $trigger, session_id: $session_id, cwd: $cwd, transcript_path: $transcript_path}' | \
+            "$SCRIPT_DIR/precompact-handoff.sh" >/dev/null 2>&1
+        ) &
+      fi
+      PATROL_REASON=$(echo "$SIGNAL_PAYLOAD" | jq -r '.reason // "Patrol requested handoff"' 2>/dev/null) || PATROL_REASON="Patrol requested handoff"
+      cat << PATROL_EOF
+{
+  "hookSpecificOutput": {
+    "hookEventName": "UserPromptSubmit",
+    "additionalContext": "REMEMBRALL: Owl Post from Patrol — ${PATROL_REASON}. Run /handoff to save progress."
+  }
+}
+PATROL_EOF
+      exit 0
+    elif [ "$PATROL_SIGNAL" = "context_alert" ]; then
+      remembrall_debug "patrol signal: context_alert"
+      PATROL_MSG=$(echo "$SIGNAL_PAYLOAD" | jq -r '.message // ""' 2>/dev/null) || PATROL_MSG=""
+      # Check skip_timeturner flag
+      SKIP_TT=$(echo "$SIGNAL_PAYLOAD" | jq -r '.skip_timeturner // false' 2>/dev/null) || SKIP_TT="false"
+      if [ "$SKIP_TT" = "true" ]; then
+        # Write skip marker to suppress TT spawn
+        mkdir -p "/tmp/remembrall-timeturner"
+        echo "skip" > "/tmp/remembrall-timeturner/${SESSION_ID}-skip"
+      fi
+      if [ -n "$PATROL_MSG" ]; then
+        cat << PATROL_ALERT_EOF
+{
+  "hookSpecificOutput": {
+    "hookEventName": "UserPromptSubmit",
+    "additionalContext": "REMEMBRALL: Owl Post from Patrol — ${PATROL_MSG}"
+  }
+}
+PATROL_ALERT_EOF
+        exit 0
+      fi
+    fi
+  fi
+fi
+
 # Find bridge file (checks CWD + parent dirs), fall back to transcript size
 ESTIMATED=""
 REMAINING=""
@@ -80,13 +140,15 @@ if [ -z "$REMAINING" ]; then
     exit 0
   fi
   REMAINING=$(remembrall_estimate_context "$TRANSCRIPT_PATH") || exit 0
+  # shellcheck disable=SC2034
   ESTIMATED=" (estimated)"
 fi
 
 # ── Configurable thresholds ───────────────────────────────────────
-THRESHOLD_JOURNAL=$(remembrall_threshold "journal" 60)
+THRESHOLD_JOURNAL=$(remembrall_threshold "journal" 65)
 THRESHOLD_WARNING=$(remembrall_threshold "warning" 35)
-THRESHOLD_URGENT=$(remembrall_threshold "urgent" 15)
+THRESHOLD_URGENT=$(remembrall_threshold "urgent" 25)
+THRESHOLD_TIMETURNER=$(remembrall_threshold "timeturner" 30)
 
 # Nudge tracking — don't spam every prompt
 NUDGE_DIR="/tmp/remembrall-nudges"
@@ -160,6 +222,20 @@ if [ -n "$TRANSCRIPT_PATH" ] && [ -f "$TRANSCRIPT_PATH" ]; then
   fi
 fi
 
+# ── Obliviate: spawn analyzer at journal threshold (background) ───
+if [ "$(remembrall_config "obliviate" "true")" = "true" ] && [ -n "$CWD" ]; then
+  _obliviate_dir=$(remembrall_obliviate_dir)
+  _obliviate_file="$_obliviate_dir/${SESSION_ID}.json"
+  if [ ! -f "$_obliviate_file" ]; then
+    (echo "$INPUT" | "$SCRIPT_DIR/obliviate-analyze.sh" >/dev/null 2>&1) &
+  fi
+fi
+
+# ── Budget: spawn analyzer below journal threshold (background) ──
+if [ "$(remembrall_config "budget_enabled" "false")" = "true" ] && [ -n "$TRANSCRIPT_PATH" ] && [ -f "$TRANSCRIPT_PATH" ]; then
+  (echo "$INPUT" | "$SCRIPT_DIR/budget-analyze.sh" >/dev/null 2>&1) &
+fi
+
 # Between journal and warning thresholds — JOURNAL CHECKPOINT
 if remembrall_gt "$REMAINING" "$THRESHOLD_WARNING"; then
   if [ "$LAST_NUDGE" = "journal" ] || [ "$LAST_NUDGE" = "warning" ] || [ "$LAST_NUDGE" = "urgent" ]; then
@@ -168,13 +244,46 @@ if remembrall_gt "$REMAINING" "$THRESHOLD_WARNING"; then
   echo "journal" > "$NUDGE_FILE"
   SPELL_LINE=""
   if [ "$(remembrall_config "easter_eggs" "true")" = "true" ]; then
-    SPELL_LINE=" Spells: Expecto Patronum=/handoff, Lumos=/status, Accio=/replay, Prior Incantato=handoff count this session (only if user speaks HP)"
+    SPELL_LINE=" Spells: Expecto Patronum=/handoff, Lumos=/status, Accio=/replay, Pensieve=/pensieve, Marauder's Map=/map, Time-Turner=/timeturner, Lineage=/lineage, Insights=/insights, Obliviate=/obliviate, Budget=/budget, Prior Incantato=handoff count this session (only if user speaks HP)"
+  fi
+  # Obliviate: include stale memory warning if analysis is ready
+  OBLIVIATE_MSG=""
+  _obliviate_dir=$(remembrall_obliviate_dir)
+  if [ -f "$_obliviate_dir/${SESSION_ID}.json" ]; then
+    _stale_count=$(jq -r '.stale_count // 0' "$_obliviate_dir/${SESSION_ID}.json" 2>/dev/null) || _stale_count=0
+    if [ "$_stale_count" -gt 0 ]; then
+      if [ "$(remembrall_config "easter_eggs" "true")" = "true" ]; then
+        OBLIVIATE_MSG=" Obliviate! ${_stale_count} stale memories detected — run /obliviate to review."
+      else
+        OBLIVIATE_MSG=" ${_stale_count} stale memories detected — run /obliviate to review."
+      fi
+    fi
+  fi
+  # Budget: include imbalance warning if analysis is ready
+  BUDGET_MSG=""
+  _budget_dir=$(remembrall_budget_dir)
+  if [ -f "$_budget_dir/${SESSION_ID}.json" ]; then
+    _warning_count=$(jq '.warnings | length' "$_budget_dir/${SESSION_ID}.json" 2>/dev/null) || _warning_count=0
+    if [ "$_warning_count" -gt 0 ]; then
+      _top_cat=$(jq -r '.warnings[0].category // "unknown"' "$_budget_dir/${SESSION_ID}.json" 2>/dev/null) || _top_cat="unknown"
+      _top_pct=$(jq -r '.warnings[0].actual // 0' "$_budget_dir/${SESSION_ID}.json" 2>/dev/null) || _top_pct=0
+      if [ "$(remembrall_config "easter_eggs" "true")" = "true" ]; then
+        _house="Ravenclaw"
+        case "$_top_cat" in
+          conversation) _house="Gryffindor" ;;
+          memory) _house="Hufflepuff" ;;
+        esac
+        BUDGET_MSG=" The Sorting Hat detects an imbalance! ${_house} has claimed ${_top_pct}% of the common room."
+      else
+        BUDGET_MSG=" Budget warning: ${_top_cat} at ${_top_pct}% (over budget)."
+      fi
+    fi
   fi
   cat << EOF
 {
   "hookSpecificOutput": {
     "hookEventName": "UserPromptSubmit",
-    "additionalContext": "REMEMBRALL: Context at ${REMAINING}%.${PROMPTS_MSG} Run /handoff when ready to save progress.${SPELL_LINE}"
+    "additionalContext": "REMEMBRALL: Context at ${REMAINING}%.${PROMPTS_MSG} Run /handoff when ready to save progress.${OBLIVIATE_MSG}${BUDGET_MSG}${SPELL_LINE}"
   }
 }
 EOF
@@ -202,48 +311,46 @@ _create_preemptive_handoff() {
   ) &
 }
 
-# ── Detect autonomous mode (ralph loop, swarms, etc.) ──
-IS_AUTONOMOUS=false
-AUTONOMOUS_SKILL=""
-if [ "$(remembrall_config "autonomous_mode" "false")" = "true" ]; then
-  IS_AUTONOMOUS=true
-  AUTONOMOUS_SKILL="config"
+# ── Time-Turner: spawn parallel agent at threshold ──────────────
+# Fires once when context drops to time-turner threshold (default 30%).
+# Must run BEFORE the urgent exit — if context drops from 35% to 20% in
+# one turn, the urgent block would exit before reaching this check.
+# Patrol can suppress TT spawn via skip_timeturner signal.
+if remembrall_le "$REMAINING" "$THRESHOLD_TIMETURNER"; then
+  TT_STATE_DIR="/tmp/remembrall-timeturner/${SESSION_ID}"
+  TT_SKIP_FILE="/tmp/remembrall-timeturner/${SESSION_ID}-skip"
+  if [ ! -d "$TT_STATE_DIR" ] && [ ! -f "$TT_SKIP_FILE" ] && [ "$(remembrall_config "time_turner" "false")" = "true" ]; then
+    remembrall_debug "spawning Time-Turner at ${REMAINING}%"
+    (echo "$INPUT" | "$SCRIPT_DIR/time-turner-spawn.sh" >/dev/null 2>&1) &
+  fi
 fi
-if [ "$IS_AUTONOMOUS" = false ]; then
-  AUTONOMOUS_SKILL=$(remembrall_is_autonomous "$SESSION_ID" 2>/dev/null) && IS_AUTONOMOUS=true || true
-fi
-# Escape for safe JSON interpolation
-AUTONOMOUS_SKILL=$(remembrall_escape_json "$AUTONOMOUS_SKILL")
 
-# At or below urgent threshold — URGENT (two-stage escalation)
-# Stage 1: first prompt at ≤15% → urgent nudge + preemptive handoff
-# Stage 2: second consecutive prompt at ≤15% → hard block (attended only)
-# Never block on estimated values or autonomous sessions.
+# ── Detect autonomous mode ──────────────────────────────────────
+IS_AUTONOMOUS=false
+if [ "$(remembrall_config "autonomous_mode" "true")" = "true" ]; then
+  IS_AUTONOMOUS=true
+fi
+if [ "$IS_AUTONOMOUS" = false ] && [ -n "$SESSION_ID" ]; then
+  remembrall_is_autonomous "$SESSION_ID" >/dev/null 2>&1 && IS_AUTONOMOUS=true || true
+fi
+
+# At or below urgent threshold — URGENT (safety net if warning was ignored)
 if remembrall_le "$REMAINING" "$THRESHOLD_URGENT"; then
+  echo "urgent" > "$NUDGE_FILE"
+  _create_preemptive_handoff
+
   if [ "$IS_AUTONOMOUS" = true ]; then
-    echo "urgent" > "$NUDGE_FILE"
+    # Autonomous: handoff + keep working — auto-compaction handles the rest
     cat << EOF
 {
   "hookSpecificOutput": {
     "hookEventName": "UserPromptSubmit",
-    "additionalContext": "REMEMBRALL_URGENT: Context critical (${REMAINING}%). AUTONOMOUS MODE (${AUTONOMOUS_SKILL}) — run /handoff NOW, continue working."
+    "additionalContext": "REMEMBRALL_URGENT: Context critical (${REMAINING}%). AUTONOMOUS MODE — run /handoff NOW, continue working. Auto-compaction will reset context and auto-resume."
   }
 }
 EOF
-  elif [ -n "$ESTIMATED" ]; then
-    # Never block on estimated values — just warn
-    echo "urgent" > "$NUDGE_FILE"
-    cat << EOF
-{
-  "hookSpecificOutput": {
-    "hookEventName": "UserPromptSubmit",
-    "additionalContext": "REMEMBRALL_URGENT: Context critical (${REMAINING}%, estimated). BLOCKING REQUIREMENT: You MUST run /handoff NOW, then call EnterPlanMode immediately."
-  },
-  "systemMessage": "BLOCKING REQUIREMENT: Context is CRITICAL (${REMAINING}%, estimated). You MUST immediately run /handoff to save progress, followed by EnterPlanMode. Do NOT proceed with other tasks until this is complete."
-}
-EOF
-  elif [ "$LAST_NUDGE" = "urgent" ]; then
-    # Stage 2: block (second consecutive prompt at ≤threshold)
+  else
+    # Normal: handoff + EnterPlanMode — user clicks "Yes, clear context"
     HANDOFF_DIR=$(remembrall_handoff_dir "$CWD" 2>/dev/null) || HANDOFF_DIR=""
     HAS_HANDOFF=false
     if [ -n "$HANDOFF_DIR" ] && [ -n "$SESSION_ID" ]; then
@@ -252,59 +359,52 @@ EOF
     if [ "$HAS_HANDOFF" = true ]; then
       cat << EOF
 {
-  "decision": "block",
-  "reason": "Context critical (${REMAINING}%). Handoff already saved. Type /clear then /replay to continue."
+  "hookSpecificOutput": {
+    "hookEventName": "UserPromptSubmit",
+    "additionalContext": "REMEMBRALL_URGENT: Context critical (${REMAINING}%). Handoff already saved. BLOCKING REQUIREMENT: Call EnterPlanMode NOW. Tell the user: Click 'Yes, clear context' — work auto-resumes. Do NOT instruct user to type /clear or /replay."
+  },
+  "systemMessage": "BLOCKING REQUIREMENT: Context CRITICAL (${REMAINING}%). Handoff saved. Call EnterPlanMode immediately. Do NOT proceed with other tasks."
 }
 EOF
     else
       cat << EOF
 {
-  "decision": "block",
-  "reason": "Context critical (${REMAINING}%). Type /handoff to save work, then /clear and /replay."
+  "hookSpecificOutput": {
+    "hookEventName": "UserPromptSubmit",
+    "additionalContext": "REMEMBRALL_URGENT: Context critical (${REMAINING}%). BLOCKING REQUIREMENT: Run /handoff NOW, then call EnterPlanMode. Tell the user: Click 'Yes, clear context' — work auto-resumes. Do NOT instruct user to type /clear or /replay."
+  },
+  "systemMessage": "BLOCKING REQUIREMENT: Context CRITICAL (${REMAINING}%). Run /handoff NOW, then call EnterPlanMode. Do NOT proceed with other tasks."
 }
 EOF
     fi
-  else
-    # Stage 1: first prompt at ≤threshold — urgent nudge
-    echo "urgent" > "$NUDGE_FILE"
-    _create_preemptive_handoff
-    cat << EOF
-{
-  "hookSpecificOutput": {
-    "hookEventName": "UserPromptSubmit",
-    "additionalContext": "REMEMBRALL_URGENT: Context critical (${REMAINING}%). BLOCKING REQUIREMENT: You MUST run /handoff NOW, then call EnterPlanMode immediately."
-  },
-  "systemMessage": "BLOCKING REQUIREMENT: Context is CRITICAL (${REMAINING}%). You MUST immediately run /handoff to save progress, followed by EnterPlanMode. Do NOT proceed with other tasks until this is complete."
-}
-EOF
   fi
   exit 0
 fi
 
 # At or below warning threshold — WARNING
-# Warning nudges repeat on every prompt until handoff compliance.
 echo "warning" > "$NUDGE_FILE"
+if [ "$LAST_NUDGE" != "warning" ] && [ "$LAST_NUDGE" != "urgent" ]; then
+  _create_preemptive_handoff
+fi
 if [ "$IS_AUTONOMOUS" = true ]; then
+  # Autonomous: handoff + keep working — auto-compaction handles the rest
   cat << EOF
 {
   "hookSpecificOutput": {
     "hookEventName": "UserPromptSubmit",
-    "additionalContext": "REMEMBRALL_WARN: Context at ${REMAINING}%. AUTONOMOUS MODE (${AUTONOMOUS_SKILL}) — run /handoff, continue working."
+    "additionalContext": "REMEMBRALL_WARN: Context at ${REMAINING}%.${PROMPTS_MSG} AUTONOMOUS MODE — run /handoff NOW, continue working. Auto-compaction will reset context and auto-resume."
   }
 }
 EOF
 else
-  # Only create preemptive handoff on first warning nudge
-  if [ "$LAST_NUDGE" != "warning" ] && [ "$LAST_NUDGE" != "urgent" ]; then
-    _create_preemptive_handoff
-  fi
+  # Normal: handoff + EnterPlanMode — user clicks "Yes, clear context"
   cat << EOF
 {
   "hookSpecificOutput": {
     "hookEventName": "UserPromptSubmit",
-    "additionalContext": "REMEMBRALL_WARN: Context at ${REMAINING}%. BLOCKING REQUIREMENT: You MUST run /handoff and immediately call EnterPlanMode before continuing."
+    "additionalContext": "REMEMBRALL_WARN: Context at ${REMAINING}%.${PROMPTS_MSG} BLOCKING REQUIREMENT: Run /handoff NOW, then call EnterPlanMode. Tell the user: Handoff saved — click 'Yes, clear context' to continue with fresh context. Work auto-resumes after clear."
   },
-  "systemMessage": "BLOCKING REQUIREMENT: You MUST immediately call EnterPlanMode to address the low context remaining (${REMAINING}%). This is REQUIRED before performing any further tasks."
+  "systemMessage": "BLOCKING REQUIREMENT: Context at ${REMAINING}%. Run /handoff, then call EnterPlanMode immediately. Do NOT instruct the user to type /clear or /replay."
 }
 EOF
 fi

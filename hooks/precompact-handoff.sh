@@ -257,18 +257,47 @@ REMEMBRALL_HEADER
   echo '```'
 } >> "$HANDOFF_FILE"
 
-# Copy to team directory if enabled
-if remembrall_team_enabled; then
-  TEAM_DIR=$(remembrall_team_handoff_dir "$CWD")
-  mkdir -p "$TEAM_DIR"
-  cp "$HANDOFF_FILE" "$TEAM_DIR/"
+# ── Pensieve: distill session intelligence before compaction ──────
+if [ "$(remembrall_config "pensieve" "true")" = "true" ]; then
+  PENSIEVE_SUMMARY=$("$SCRIPT_DIR/pensieve-distill.sh" "$SESSION_ID" "$CWD" 2>/dev/null) || PENSIEVE_SUMMARY=""
+  if [ -n "$PENSIEVE_SUMMARY" ]; then
+    {
+      echo ''
+      echo '## Session Intelligence (Pensieve)'
+      echo ''
+      echo '```json'
+      printf '%s\n' "$PENSIEVE_SUMMARY"
+      echo '```'
+    } >> "$HANDOFF_FILE"
+    remembrall_debug "pensieve distillation embedded in handoff"
+  fi
 fi
+
+# Team copy is a no-op since v2.8.0 (all handoffs centralized in ~/.remembrall)
+# Team flag is preserved in frontmatter metadata only
 
 # Clean up stale handoffs based on configurable retention (default: 72h)
 RETENTION_HOURS=$(remembrall_retention_hours)
 RETENTION_MINS=$((RETENTION_HOURS * 60))
 if [ "$RETENTION_MINS" -gt 0 ] 2>/dev/null; then
   find "$HANDOFF_DIR" -name "handoff-*.md" -mmin +"$RETENTION_MINS" -delete 2>/dev/null || true
+fi
+
+# ── Lineage: record session in ancestry index ────────────────────
+if [ "$(remembrall_config "lineage" "true")" = "true" ]; then
+  _files_count=$(echo "$FILE_PATHS" | grep -c '[^[:space:]]' 2>/dev/null) || _files_count=0
+  (
+    jq -n \
+      --arg sid "$SESSION_ID" \
+      --arg pid "${PREV_SESSION:-}" \
+      --arg cwd "$CWD" \
+      --arg type "normal" \
+      --arg status "interrupted" \
+      --arg goal "${USER_GOAL:0:200}" \
+      --argjson fc "$_files_count" \
+      '{session_id: $sid, parent_id: $pid, cwd: $cwd, type: $type, status: $status, goal: $goal, files_count: $fc}' | \
+      "$SCRIPT_DIR/lineage-record.sh" >/dev/null 2>&1
+  ) &
 fi
 
 # Signal to Claude that handoff was created

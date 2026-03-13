@@ -109,8 +109,29 @@ TEMP_DIRS=(
   "/tmp/remembrall-bootstrap"
   "/tmp/remembrall-handoff-count"
   "/tmp/remembrall-autonomous"
+  "/tmp/remembrall-pensieve"
+  "/tmp/remembrall-timeturner"
+  "/tmp/remembrall-meta"
   "/tmp/claude-context-pct"
 )
+
+# Clean up Time-Turner git worktrees before removing state dirs
+if [ -d "/tmp/remembrall-timeturner" ]; then
+  for tt_dir in /tmp/remembrall-timeturner/*/; do
+    [ -d "$tt_dir" ] || continue
+    tt_sid=$(basename "$tt_dir")
+    if [ -d "${tt_dir}worktree" ]; then
+      if [ "$DRY_RUN" = true ]; then
+        echo "  Would remove git worktree ${tt_dir}worktree"
+      else
+        # Try to find the main repo to properly remove worktree
+        git worktree remove --force "${tt_dir}worktree" 2>/dev/null || rm -rf "${tt_dir}worktree" 2>/dev/null || true
+        git branch -D "timeturner/${tt_sid}" 2>/dev/null || true
+        echo "  Removed Time-Turner worktree for session $tt_sid"
+      fi
+    fi
+  done
+fi
 
 for dir in "${TEMP_DIRS[@]}"; do
   if [ -d "$dir" ]; then

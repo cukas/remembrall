@@ -171,13 +171,46 @@ NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 # Append the markdown content (via printf to prevent shell expansion)
 printf '%s\n' "$CONTENT" >> "$HANDOFF_FILE"
 
-# ─── Team copy ───────────────────────────────────────────────────
+# ─── Pensieve: append session intelligence section ────────────────
+
+if [ "$(remembrall_config "pensieve" "true")" = "true" ]; then
+  PENSIEVE_SUMMARY=$("$SCRIPT_DIR/../hooks/pensieve-distill.sh" "$SESSION_ID" "$CWD" 2>/dev/null) || PENSIEVE_SUMMARY=""
+  if [ -n "$PENSIEVE_SUMMARY" ]; then
+    {
+      echo ''
+      echo '## Session Intelligence (Pensieve)'
+      echo ''
+      echo '```json'
+      printf '%s\n' "$PENSIEVE_SUMMARY"
+      echo '```'
+    } >> "$HANDOFF_FILE"
+  fi
+fi
+
+# ─── Team copy (no-op: all handoffs centralized in ~/.remembrall) ──
 
 if remembrall_team_enabled; then
-  TEAM_DIR=$(remembrall_team_handoff_dir "$CWD")
-  mkdir -p "$TEAM_DIR"
-  cp "$HANDOFF_FILE" "$TEAM_DIR/"
-  echo "team:$TEAM_DIR/handoff-${SESSION_ID}.md" >&2
+  echo "team:$HANDOFF_FILE" >&2
+fi
+
+# ── Lineage: record session in ancestry index ────────────────────
+if [ "$(remembrall_config "lineage" "true")" = "true" ]; then
+  _files_count=0
+  if [ -n "$FILES_CSV" ]; then
+    _files_count=$(printf '%s' "$FILES_CSV" | tr ',' '\n' | grep -c '[^[:space:]]' 2>/dev/null) || _files_count=0
+  fi
+  (
+    jq -n \
+      --arg sid "$SESSION_ID" \
+      --arg pid "${PREV_SESSION:-}" \
+      --arg cwd "$CWD" \
+      --arg type "normal" \
+      --arg status "$STATUS" \
+      --arg goal "" \
+      --argjson fc "$_files_count" \
+      '{session_id: $sid, parent_id: $pid, cwd: $cwd, type: $type, status: $status, goal: $goal, files_count: $fc}' | \
+      "$SCRIPT_DIR/../hooks/lineage-record.sh" >/dev/null 2>&1
+  ) &
 fi
 
 # ─── Clean up nudge state + track handoff count ─────────────────
