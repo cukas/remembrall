@@ -51,14 +51,12 @@ if [ "$(remembrall_config "patrol_integration" "true")" = "true" ] && [ -n "$SES
         ) &
       fi
       PATROL_REASON=$(echo "$SIGNAL_PAYLOAD" | jq -r '.reason // "Patrol requested handoff"' 2>/dev/null) || PATROL_REASON="Patrol requested handoff"
-      cat << PATROL_EOF
-{
-  "hookSpecificOutput": {
-    "hookEventName": "UserPromptSubmit",
-    "additionalContext": "REMEMBRALL: Owl Post from Patrol — ${PATROL_REASON}. Run /handoff to save progress."
-  }
-}
-PATROL_EOF
+      jq -n --arg reason "$PATROL_REASON" '{
+        hookSpecificOutput: {
+          hookEventName: "UserPromptSubmit",
+          additionalContext: ("REMEMBRALL: Owl Post from Patrol — " + $reason + ". Run /handoff to save progress.")
+        }
+      }'
       exit 0
     elif [ "$PATROL_SIGNAL" = "context_alert" ]; then
       remembrall_debug "patrol signal: context_alert"
@@ -71,14 +69,12 @@ PATROL_EOF
         echo "skip" > "/tmp/remembrall-timeturner/${SESSION_ID}-skip"
       fi
       if [ -n "$PATROL_MSG" ]; then
-        cat << PATROL_ALERT_EOF
-{
-  "hookSpecificOutput": {
-    "hookEventName": "UserPromptSubmit",
-    "additionalContext": "REMEMBRALL: Owl Post from Patrol — ${PATROL_MSG}"
-  }
-}
-PATROL_ALERT_EOF
+        jq -n --arg msg "$PATROL_MSG" '{
+          hookSpecificOutput: {
+            hookEventName: "UserPromptSubmit",
+            additionalContext: ("REMEMBRALL: Owl Post from Patrol — " + $msg)
+          }
+        }'
         exit 0
       fi
     fi

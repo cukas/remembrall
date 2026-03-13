@@ -17,6 +17,7 @@ SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty')
 CWD=$(echo "$INPUT" | jq -r '.cwd // empty')
 
 [ -n "$SESSION_ID" ] || exit 0
+[[ "$SESSION_ID" =~ ^[a-zA-Z0-9_.-]+$ ]] || exit 0
 [ -n "$CWD" ] || exit 0
 
 PENSIEVE_DIR=$(remembrall_pensieve_dir "$CWD" 2>/dev/null) || PENSIEVE_DIR=""
@@ -38,6 +39,7 @@ mkdir -p "$OBLIVIATE_DIR"
 REPORT_FILE="$OBLIVIATE_DIR/${SESSION_ID}.json"
 
 NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+TMP_REPORT=$(mktemp "${REPORT_FILE}.XXXXXX")
 jq -n \
   --arg ts "$NOW" \
   --arg sid "$SESSION_ID" \
@@ -48,6 +50,11 @@ jq -n \
     session_id: $sid,
     stale_count: $stale,
     memories: $analysis
-  }' > "$REPORT_FILE" 2>/dev/null
+  }' > "$TMP_REPORT" 2>/dev/null
+if [ -s "$TMP_REPORT" ]; then
+  mv "$TMP_REPORT" "$REPORT_FILE"
+else
+  rm -f "$TMP_REPORT"
+fi
 
 remembrall_debug "obliviate: found $STALE_COUNT stale memories"

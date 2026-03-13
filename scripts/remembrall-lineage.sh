@@ -67,11 +67,10 @@ _render_session() {
   local entry
   entry=$(jq --arg sid "$sid" '.sessions[] | select(.session_id == $sid)' "$INDEX" 2>/dev/null) || return
 
-  local type status goal ts files_touched
+  local type status goal files_touched
   type=$(echo "$entry" | jq -r '.type // "normal"')
   status=$(echo "$entry" | jq -r '.status // "unknown"')
   goal=$(echo "$entry" | jq -r '.goal // ""' | cut -c1-60)
-  ts=$(echo "$entry" | jq -r '.timestamp // ""')
   files_touched=$(echo "$entry" | jq -r '.files_touched // 0')
 
   # Format status with color

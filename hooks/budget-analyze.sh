@@ -17,13 +17,14 @@ SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty')
 TRANSCRIPT_PATH=$(echo "$INPUT" | jq -r '.transcript_path // empty')
 
 [ -n "$SESSION_ID" ] || exit 0
+[[ "$SESSION_ID" =~ ^[a-zA-Z0-9_.-]+$ ]] || exit 0
 [ -n "$TRANSCRIPT_PATH" ] && [ -f "$TRANSCRIPT_PATH" ] || exit 0
 
 # Extract category bytes
 CATEGORIES=$(remembrall_extract_category_bytes "$TRANSCRIPT_PATH")
-CODE_BYTES=$(printf '%s' "$CATEGORIES" | cut -f1)
-CONV_BYTES=$(printf '%s' "$CATEGORIES" | cut -f2)
-MEM_BYTES=$(printf '%s' "$CATEGORIES" | cut -f3)
+CODE_BYTES=$(printf '%s' "$CATEGORIES" | cut -f1); CODE_BYTES=${CODE_BYTES:-0}
+CONV_BYTES=$(printf '%s' "$CATEGORIES" | cut -f2); CONV_BYTES=${CONV_BYTES:-0}
+MEM_BYTES=$(printf '%s' "$CATEGORIES" | cut -f3); MEM_BYTES=${MEM_BYTES:-0}
 
 TOTAL=$((CODE_BYTES + CONV_BYTES + MEM_BYTES))
 [ "$TOTAL" -gt 0 ] || exit 0
@@ -39,9 +40,9 @@ mkdir -p "$BUDGET_DIR"
 REPORT_FILE="$BUDGET_DIR/${SESSION_ID}.json"
 
 # Get configured budgets
-CFG_CODE=$(remembrall_config "budget_code" "50")
-CFG_CONV=$(remembrall_config "budget_conversation" "30")
-CFG_MEM=$(remembrall_config "budget_memory" "20")
+CFG_CODE=$(remembrall_config "budget_code" "50"); CFG_CODE=${CFG_CODE:-50}
+CFG_CONV=$(remembrall_config "budget_conversation" "30"); CFG_CONV=${CFG_CONV:-30}
+CFG_MEM=$(remembrall_config "budget_memory" "20"); CFG_MEM=${CFG_MEM:-20}
 
 # Detect warnings
 WARNINGS="[]"

@@ -21,6 +21,12 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+# Validate SESSION_ID format (prevent path traversal)
+if [ -n "$SESSION_ID" ] && ! [[ "$SESSION_ID" =~ ^[a-zA-Z0-9_.-]+$ ]]; then
+  echo "Error: invalid session_id format" >&2
+  exit 1
+fi
+
 OBLIVIATE_DIR=$(remembrall_obliviate_dir)
 REPORT_FILE=""
 

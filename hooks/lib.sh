@@ -1345,6 +1345,23 @@ remembrall_lineage_record() {
     --arg ts "$now" \
     '{session_id: $sid, parent_id: $pid, type: $type, status: $status, goal: $goal, files_touched: $files, timestamp: $ts}')
 
+  # Lock to prevent concurrent writers from losing records
+  local lock_dir="${index}.lock"
+  local _got_lock=false
+  for _i in 1 2 3 4 5; do
+    if mkdir "$lock_dir" 2>/dev/null; then
+      _got_lock=true
+      # shellcheck disable=SC2064
+      trap "rmdir '$lock_dir' 2>/dev/null || true" EXIT
+      break
+    fi
+    sleep 0.1
+  done
+  if [ "$_got_lock" = false ]; then
+    remembrall_debug "lineage: failed to acquire lock on $index"
+    return 0
+  fi
+
   if [ -f "$index" ]; then
     # Update existing entry or append
     local exists
@@ -1368,6 +1385,9 @@ remembrall_lineage_record() {
   else
     printf '{"sessions":[%s]}' "$entry" | jq '.' > "$index" 2>/dev/null
   fi
+
+  # Release lock
+  [ "$_got_lock" = true ] && rmdir "$lock_dir" 2>/dev/null || true
 }
 
 # Walk parent chain to compute depth
