@@ -1944,7 +1944,7 @@ if [ -f "$PENSIEVE_OUT" ]; then
   printf "${GREEN}  PASS${RESET} pensieve-track: JSONL output file created\n"; PASS=$((PASS+1))
 else
   TRACK_ERR_MSG=$(cat "$PENSIEVE_TRACK_ERR" 2>/dev/null | head -3 | tr '\n' '|') || TRACK_ERR_MSG=""
-  printf "${RED}  FAIL${RESET} pensieve-track: JSONL output file not created\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - pensieve-track: JSONL output file created"
+  printf "${RED}  FAIL${RESET} pensieve-track: JSONL output file not created (%s)\n" "$TRACK_ERR_MSG"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - pensieve-track: JSONL output file created"
 fi
 
 # Verify file paths present in output
