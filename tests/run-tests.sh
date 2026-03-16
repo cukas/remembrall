@@ -2959,7 +2959,7 @@ AK_TEST_CWD="$TMPDIR_ROOT/phoenix-capture-test"
 mkdir -p "$AK_TEST_CWD"
 # Init a git repo so capture can get branch/commit
 git -C "$AK_TEST_CWD" init -q 2>/dev/null
-git -C "$AK_TEST_CWD" commit --allow-empty -m "init" -q 2>/dev/null
+git -C "$AK_TEST_CWD" -c user.name="test" -c user.email="test@test" commit --allow-empty -m "init" -q 2>/dev/null
 
 AK_PHOENIX_SESS="test-phoenix-ak-sess"
 AK_FILE=$(bash "$PLUGIN_ROOT/scripts/avadakedavra-capture.sh" \

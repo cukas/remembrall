@@ -662,8 +662,10 @@ remembrall_detect_model() {
 
   # Derive max_transcript_kb from window size: window × bpt × overhead / 1024
   # Overhead factor ~2.0 accounts for JSON structure wrapping content
-  local bpt_x10=$(printf '%s' "$bpt" | sed 's/\.//')
-  local max_kb=$(( window_tokens * bpt_x10 * 2 / 10240 ))
+  local bpt_x10
+  bpt_x10=$(printf '%s' "$bpt" | sed 's/\.//')
+  local max_kb
+  max_kb=$(( window_tokens * bpt_x10 * 2 / 10240 ))
   # Floor at 1500 for sanity
   [ "$max_kb" -lt 1500 ] && max_kb=1500
 
