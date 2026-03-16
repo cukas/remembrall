@@ -83,6 +83,8 @@ cleanup() {
   rm -f /tmp/remembrall-pensieve/test-map-sess.jsonl 2>/dev/null
   # Time-Turner test cleanup
   rm -rf /tmp/remembrall-timeturner/test-tt-sess 2>/dev/null
+  # Phoenix test cleanup
+  rm -rf /tmp/remembrall-phoenix 2>/dev/null
   true
 }
 trap cleanup EXIT
@@ -144,6 +146,26 @@ assert_match "under .remembrall/handoffs/<project-name>-<hash>" '\.remembrall/ha
 DIR2=$(remembrall_handoff_dir "/tmp/my-project")
 assert_eq "deterministic for same cwd" "$DIR" "$DIR2"
 
+# Normalization: trailing slashes and symlinks should resolve to the same dir
+TEST_NORMALIZE_DIR="/tmp/remembrall-normalize-$$/real-project"
+TEST_NORMALIZE_LINK="/tmp/remembrall-normalize-$$/linked-project"
+mkdir -p "$TEST_NORMALIZE_DIR"
+ln -s "$TEST_NORMALIZE_DIR" "$TEST_NORMALIZE_LINK"
+DIR_TRAILING=$(remembrall_handoff_dir "$TEST_NORMALIZE_DIR///")
+DIR_REAL=$(remembrall_handoff_dir "$TEST_NORMALIZE_DIR")
+DIR_LINK=$(remembrall_handoff_dir "$TEST_NORMALIZE_LINK")
+assert_eq "trailing slashes normalize before hashing" "$DIR_REAL" "$DIR_TRAILING"
+assert_eq "symlink path resolves to same storage dir" "$DIR_REAL" "$DIR_LINK"
+
+# Compatibility: reuse an existing short-hash dir even if the slug changed
+COMPAT_HASH=$(remembrall_project_hash "$TEST_NORMALIZE_DIR" | cut -c1-8)
+COMPAT_DIR="$HOME/.remembrall/handoffs/alias-${COMPAT_HASH}"
+mkdir -p "$COMPAT_DIR"
+rm -rf "$DIR_REAL"
+DIR_COMPAT=$(remembrall_handoff_dir "$TEST_NORMALIZE_DIR")
+assert_eq "existing compatible short-hash dir is reused" "$COMPAT_DIR" "$DIR_COMPAT"
+rm -rf "/tmp/remembrall-normalize-$$" "$COMPAT_DIR"
+
 # Collision safety: same basename, different parent
 DIR3=$(remembrall_handoff_dir "/work/clientA/api")
 DIR4=$(remembrall_handoff_dir "/work/clientB/api")
@@ -156,9 +178,9 @@ else
   ERRORS="${ERRORS}\n  - collision safe: different parents produce different dirs"
 fi
 
-# Edge case: CWD is "." — should not produce path traversal
+# Edge case: CWD is "." — resolves to actual path, no traversal
 DIR_DOT=$(remembrall_handoff_dir ".")
-assert_match "dot CWD handled safely" '\.remembrall/handoffs/default-[0-9a-f]{8}$' "$DIR_DOT"
+assert_match "dot CWD handled safely" '\.remembrall/handoffs/' "$DIR_DOT"
 
 # ── remembrall_patches_dir ────────────────────────────────────────
 echo ""
@@ -463,33 +485,33 @@ assert_match "55% checkpoint suggests /handoff" "/handoff" "$OUTPUT"
 OUTPUT=$(echo '{"session_id":"test-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
 assert_eq "55% second time: suppressed" "" "$OUTPUT"
 
-# 34% — warning with plan mode (threshold default: 35)
+# 34% — warning: suggests /handoff (threshold default: 35)
 echo "34" > "$CTX_DIR/test-sess"
 OUTPUT=$(echo '{"session_id":"test-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
-assert_match "34% triggers warning" "REMEMBRALL_WARN.*EnterPlanMode" "$OUTPUT"
-assert_match "34% warning suggests EnterPlanMode" "EnterPlanMode" "$OUTPUT"
+assert_match "34% triggers warning" "REMEMBRALL_WARN" "$OUTPUT"
+assert_match "34% warning suggests /handoff" "/handoff" "$OUTPUT"
 
 # 34% again — persistent (no handoff yet)
 OUTPUT=$(echo '{"session_id":"test-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
 assert_match "34% second time: persistent (no handoff yet)" "REMEMBRALL_WARN" "$OUTPUT"
 
-# 24% — urgent with plan mode (threshold default: 25)
+# 24% — urgent: AK fires (threshold default: 25)
 echo "24" > "$CTX_DIR/test-sess"
 OUTPUT=$(echo '{"session_id":"test-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
 assert_match "24% triggers urgent" "REMEMBRALL_URGENT.*critical" "$OUTPUT"
-assert_match "24% urgent requires EnterPlanMode" "EnterPlanMode" "$OUTPUT"
-assert_match "24% urgent says Run /handoff NOW" "Run /handoff NOW" "$OUTPUT"
+assert_match "24% urgent invokes avadakedavra" "avadakedavra" "$OUTPUT"
+assert_match "24% urgent is BLOCKING" "BLOCKING" "$OUTPUT"
 
-# 24% again — stage 2: enforce plan mode
+# 24% again — still urgent
 OUTPUT=$(echo '{"session_id":"test-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
-assert_match "24% second time: urgent with EnterPlanMode" "EnterPlanMode" "$OUTPUT"
+assert_match "24% second time: still urgent AK" "avadakedavra" "$OUTPUT"
 
-# Create handoff file — nudge should STILL fire
+# Create handoff file — urgent should STILL fire (AK regardless)
 HOFF_DIR=$(source "$PLUGIN_ROOT/hooks/lib.sh" && remembrall_handoff_dir "$TEST_CWD")
 mkdir -p "$HOFF_DIR"
 echo "# handoff" > "$HOFF_DIR/handoff-test-sess.md"
 OUTPUT=$(echo '{"session_id":"test-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
-assert_match "24% after handoff saved: urgent with EnterPlanMode" "Handoff already saved.*EnterPlanMode" "$OUTPUT"
+assert_match "24% after handoff saved: still fires AK" "REMEMBRALL_URGENT" "$OUTPUT"
 rm -f "$HOFF_DIR/handoff-test-sess.md"
 
 # 90% — reset (post-compaction)
@@ -551,14 +573,14 @@ else
   PASS=$((PASS + 1))
 fi
 
-# Normal mode: warning at 34% — EnterPlanMode + user clicks clear
+# Normal mode: warning at 34% — suggests /handoff (AK fires at urgent)
 remembrall_config_set "autonomous_mode" "false" 2>/dev/null
 echo "34" > "$CTX_DIR/test-auto-sess"
 rm -f "/tmp/remembrall-nudges/test-auto-sess"
 OUTPUT=$(echo '{"session_id":"test-auto-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
-assert_match "34% normal: includes EnterPlanMode" "EnterPlanMode" "$OUTPUT"
-assert_match "34% normal: has systemMessage" "systemMessage" "$OUTPUT"
-assert_match "34% normal: mentions auto-resumes" "auto-resumes" "$OUTPUT"
+assert_match "34% normal: suggests /handoff" "/handoff" "$OUTPUT"
+assert_match "34% normal: mentions AK at urgent" "Avada Kedavra" "$OUTPUT"
+assert_match "34% normal: is WARN not URGENT" "REMEMBRALL_WARN" "$OUTPUT"
 
 # Restore default
 remembrall_config_set "autonomous_mode" "true" 2>/dev/null
@@ -848,6 +870,54 @@ assert_eq "sess-B handoff preserved" "preserved" "$R"
 rm -rf "$TEST_CWD" "$HANDOFF_DIR"
 
 echo ""
+echo "Replay fallback directory scan:"
+REPLAY_PARENT="/tmp/remembrall-test-replay-parent-$$"
+REPLAY_PROJECT="$REPLAY_PARENT/app"
+mkdir -p "$REPLAY_PROJECT"
+
+MATCH_DIR_OLD="$HOME/.remembrall/handoffs/replay-old-11111111"
+MATCH_DIR_NEW="$HOME/.remembrall/handoffs/replay-new-22222222"
+UNRELATED_DIR="$HOME/.remembrall/handoffs/replay-unrelated-33333333"
+mkdir -p "$MATCH_DIR_OLD" "$MATCH_DIR_NEW" "$UNRELATED_DIR"
+
+cat > "$MATCH_DIR_OLD/handoff-old.md" << EOF
+---
+{
+  "project": "$REPLAY_PROJECT"
+}
+---
+# Older matching handoff
+EOF
+touch -t 202601010101 "$MATCH_DIR_OLD/handoff-old.md"
+
+cat > "$MATCH_DIR_NEW/handoff-new.md" << EOF
+---
+{
+  "project": "$REPLAY_PROJECT/"
+}
+---
+# Newer matching handoff
+EOF
+touch -t 202601020202 "$MATCH_DIR_NEW/handoff-new.md"
+
+cat > "$UNRELATED_DIR/handoff-other.md" << 'EOF'
+---
+{
+  "project": "/tmp/somewhere-else"
+}
+---
+# Unrelated handoff
+EOF
+
+MATCHES=$(remembrall_replay_fallback_dirs "$REPLAY_PARENT")
+FIRST_MATCH=$(printf '%s\n' "$MATCHES" | head -1)
+MATCH_COUNT=$(printf '%s\n' "$MATCHES" | grep -c . || true)
+assert_eq "replay fallback finds newest matching dir first" "$MATCH_DIR_NEW" "$FIRST_MATCH"
+assert_eq "replay fallback returns only matching dirs" "2" "$MATCH_COUNT"
+
+rm -rf "$REPLAY_PARENT" "$MATCH_DIR_OLD" "$MATCH_DIR_NEW" "$UNRELATED_DIR"
+
+echo ""
 echo "Retention guard (find -delete safety):"
 # Verify retention_hours returns safe values
 rm -f "$HOME/.remembrall/config.json"
@@ -882,7 +952,7 @@ WINDOW=$(printf '%s' "$R" | cut -f2)
 assert_eq "opus window is 200000" "200000" "$WINDOW"
 
 MAX_KB=$(printf '%s' "$R" | cut -f4)
-assert_eq "opus max_kb is 1700" "1700" "$MAX_KB"
+assert_eq "opus max_kb is 1640 (formula-derived)" "1640" "$MAX_KB"
 
 # Unknown model
 UNKNOWN_TRANSCRIPT="$TMPDIR_ROOT/unknown_transcript.jsonl"
@@ -2818,7 +2888,7 @@ jq -n '{code_pct: 55, conversation_pct: 30, memory_pct: 15, budget: {code: 50, c
 mkdir -p "/tmp/remembrall-sessions"
 MAP_BUDGET_CWD="$TMPDIR_ROOT/map-budget-test"
 mkdir -p "$MAP_BUDGET_CWD"
-_map_hash=$(remembrall_md5 "$MAP_BUDGET_CWD" 2>/dev/null)
+_map_hash=$(remembrall_project_hash "$MAP_BUDGET_CWD" 2>/dev/null)
 echo "$MAP_BUDGET_SESS" > "/tmp/remembrall-sessions/$_map_hash"
 echo "50" > "$CTX_DIR/$MAP_BUDGET_SESS"
 
@@ -2833,6 +2903,383 @@ rm -f "$TT_SKIP_FILE" 2>/dev/null
 rm -f "/tmp/remembrall-budget/$BUDGET_SESS" "/tmp/remembrall-budget/test-budget-disabled.json" "/tmp/remembrall-budget/$MAP_BUDGET_SESS.json"
 rm -f "/tmp/remembrall-sessions/$_map_hash" 2>/dev/null
 rm -f "$HOME/.remembrall/config.json" 2>/dev/null || true
+
+# ═══════════════════════════════════════════════════════════════════
+echo ""
+echo "Phoenix Mode"
+echo "════════════"
+
+# ── Phoenix helpers ──────────────────────────────────────────────
+echo ""
+echo "Phoenix helpers:"
+
+# Setup
+PHOENIX_DIR_TEST="/tmp/remembrall-phoenix"
+rm -rf "$PHOENIX_DIR_TEST" 2>/dev/null
+
+# Test chain ID operations
+PHOENIX_TEST_SESS="test-phoenix-sess"
+PHOENIX_TEST_CHAIN="phoenix-1234567890-42"
+
+CHAIN_BEFORE=$(remembrall_phoenix_chain_id "$PHOENIX_TEST_SESS")
+assert_eq "chain_id empty before set" "" "$CHAIN_BEFORE"
+
+remembrall_phoenix_set_chain "$PHOENIX_TEST_SESS" "$PHOENIX_TEST_CHAIN"
+CHAIN_AFTER=$(remembrall_phoenix_chain_id "$PHOENIX_TEST_SESS")
+assert_eq "chain_id set and read" "$PHOENIX_TEST_CHAIN" "$CHAIN_AFTER"
+
+# Test cycle count
+CYCLE_BEFORE=$(remembrall_phoenix_cycle_count "$PHOENIX_TEST_CHAIN")
+assert_eq "cycle count starts at 0" "0" "$CYCLE_BEFORE"
+
+remembrall_phoenix_increment "$PHOENIX_TEST_CHAIN"
+CYCLE_AFTER=$(remembrall_phoenix_cycle_count "$PHOENIX_TEST_CHAIN")
+assert_eq "cycle count increments to 1" "1" "$CYCLE_AFTER"
+
+remembrall_phoenix_increment "$PHOENIX_TEST_CHAIN"
+CYCLE_AFTER2=$(remembrall_phoenix_cycle_count "$PHOENIX_TEST_CHAIN")
+assert_eq "cycle count increments to 2" "2" "$CYCLE_AFTER2"
+
+# Test lineage recording
+remembrall_phoenix_record "$PHOENIX_TEST_CHAIN" "$PHOENIX_TEST_SESS" "1"
+LINEAGE_FILE="$PHOENIX_DIR_TEST/${PHOENIX_TEST_CHAIN}.lineage"
+if [ -f "$LINEAGE_FILE" ]; then
+  LINEAGE_CONTENT=$(cat "$LINEAGE_FILE")
+  assert_match "lineage contains session_id" "$PHOENIX_TEST_SESS" "$LINEAGE_CONTENT"
+  assert_match "lineage contains chain_id" "$PHOENIX_TEST_CHAIN" "$LINEAGE_CONTENT"
+else
+  assert_eq "lineage file exists" "true" "false"
+fi
+
+# ── AK capture with Phoenix args ────────────────────────────────
+echo ""
+echo "AK capture with Phoenix args:"
+
+AK_TEST_CWD="$TMPDIR_ROOT/phoenix-capture-test"
+mkdir -p "$AK_TEST_CWD"
+# Init a git repo so capture can get branch/commit
+git -C "$AK_TEST_CWD" init -q 2>/dev/null
+git -C "$AK_TEST_CWD" commit --allow-empty -m "init" -q 2>/dev/null
+
+AK_PHOENIX_SESS="test-phoenix-ak-sess"
+AK_FILE=$(bash "$PLUGIN_ROOT/scripts/avadakedavra-capture.sh" \
+  --cwd "$AK_TEST_CWD" --session-id "$AK_PHOENIX_SESS" \
+  --trigger phoenix --cycle 3 --chain-id "$PHOENIX_TEST_CHAIN")
+
+if [ -f "$AK_FILE" ]; then
+  AK_CONTENT=$(cat "$AK_FILE")
+  assert_match "AK file has trigger phoenix" '"trigger".*"phoenix"' "$AK_CONTENT"
+  assert_match "AK file has cycle 3" '"cycle".*3' "$AK_CONTENT"
+  assert_match "AK file has chain_id" '"chain_id".*"phoenix-' "$AK_CONTENT"
+else
+  assert_eq "AK capture file created" "true" "false"
+fi
+
+# ── AK capture backward compat (no phoenix args) ────────────────
+echo ""
+echo "AK capture backward compat:"
+
+AK_COMPAT_SESS="test-phoenix-compat-sess"
+AK_COMPAT_FILE=$(bash "$PLUGIN_ROOT/scripts/avadakedavra-capture.sh" \
+  --cwd "$AK_TEST_CWD" --session-id "$AK_COMPAT_SESS")
+
+if [ -f "$AK_COMPAT_FILE" ]; then
+  AK_COMPAT_CONTENT=$(cat "$AK_COMPAT_FILE")
+  assert_match "compat AK has trigger avadakedavra" '"trigger".*"avadakedavra"' "$AK_COMPAT_CONTENT"
+  # Should NOT have cycle or chain_id fields
+  if echo "$AK_COMPAT_CONTENT" | grep -q '"cycle"'; then
+    assert_eq "compat AK has no cycle field" "false" "true"
+  else
+    printf "${GREEN}  PASS${RESET} compat AK has no cycle field\n"
+    PASS=$((PASS + 1))
+  fi
+else
+  assert_eq "compat AK capture file created" "true" "false"
+fi
+
+# ── Phoenix context-monitor integration ──────────────────────────
+echo ""
+echo "Phoenix context-monitor:"
+
+# Phoenix fires at urgent threshold when enabled
+PHOENIX_CM_SESS="test-phoenix-cm-sess"
+CTX_DIR="/tmp/claude-context-pct"
+mkdir -p "$CTX_DIR"
+echo "20" > "$CTX_DIR/$PHOENIX_CM_SESS"
+
+# Enable Phoenix mode
+remembrall_config_set "phoenix_mode" "true"
+remembrall_config_set "phoenix_max_cycles" "5"
+
+# Clean nudge state
+rm -f "/tmp/remembrall-nudges/$PHOENIX_CM_SESS"
+
+CM_INPUT=$(jq -n --arg sid "$PHOENIX_CM_SESS" --arg cwd "$AK_TEST_CWD" '{session_id: $sid, cwd: $cwd, transcript_path: ""}')
+CM_OUTPUT=$(echo "$CM_INPUT" | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null) || CM_OUTPUT=""
+assert_match "Phoenix fires at urgent threshold" "Phoenix Rebirth cycle" "$CM_OUTPUT"
+assert_match "Phoenix shows cycle number" "cycle 1" "$CM_OUTPUT"
+
+# Verify cycle was recorded
+PHOENIX_CM_CHAIN=$(remembrall_phoenix_chain_id "$PHOENIX_CM_SESS")
+if [ -n "$PHOENIX_CM_CHAIN" ]; then
+  PHOENIX_CM_CYCLE=$(remembrall_phoenix_cycle_count "$PHOENIX_CM_CHAIN")
+  assert_eq "Phoenix cycle recorded as 1" "1" "$PHOENIX_CM_CYCLE"
+else
+  assert_eq "Phoenix chain created" "true" "false"
+fi
+
+# ── Phoenix disabled: behavior identical to normal AK ────────────
+echo ""
+echo "Phoenix disabled:"
+
+PHOENIX_OFF_SESS="test-phoenix-off-sess"
+echo "20" > "$CTX_DIR/$PHOENIX_OFF_SESS"
+rm -f "/tmp/remembrall-nudges/$PHOENIX_OFF_SESS"
+
+# Disable Phoenix mode + autonomous mode to hit AK path
+remembrall_config_set "phoenix_mode" "false"
+remembrall_config_set "autonomous_mode" "false"
+
+CM_OFF_INPUT=$(jq -n --arg sid "$PHOENIX_OFF_SESS" --arg cwd "$AK_TEST_CWD" '{session_id: $sid, cwd: $cwd, transcript_path: ""}')
+CM_OFF_OUTPUT=$(echo "$CM_OFF_INPUT" | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null) || CM_OFF_OUTPUT=""
+assert_match "Normal AK fires when Phoenix disabled" "avadakedavra" "$CM_OFF_OUTPUT"
+
+# ── Safety cap: falls through to normal AK at max cycles ─────────
+echo ""
+echo "Phoenix safety cap:"
+
+PHOENIX_CAP_SESS="test-phoenix-cap-sess"
+echo "20" > "$CTX_DIR/$PHOENIX_CAP_SESS"
+rm -f "/tmp/remembrall-nudges/$PHOENIX_CAP_SESS"
+
+# Enable Phoenix with max_cycles=1, disable autonomous to hit AK path
+remembrall_config_set "phoenix_mode" "true"
+remembrall_config_set "phoenix_max_cycles" "1"
+remembrall_config_set "autonomous_mode" "false"
+
+# Pre-set cycle count to 1 (already at max)
+CAP_CHAIN="phoenix-cap-test-chain"
+remembrall_phoenix_set_chain "$PHOENIX_CAP_SESS" "$CAP_CHAIN"
+remembrall_phoenix_increment "$CAP_CHAIN"  # cycle=1, which equals max
+
+CM_CAP_INPUT=$(jq -n --arg sid "$PHOENIX_CAP_SESS" --arg cwd "$AK_TEST_CWD" '{session_id: $sid, cwd: $cwd, transcript_path: ""}')
+CM_CAP_OUTPUT=$(echo "$CM_CAP_INPUT" | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null) || CM_CAP_OUTPUT=""
+# Should fall through to normal AK since cycle (2) > max (1)
+assert_match "Falls through to normal AK at max cycles" "avadakedavra" "$CM_CAP_OUTPUT"
+
+# ── Config validation ────────────────────────────────────────────
+echo ""
+echo "Phoenix config validation:"
+
+assert_nonzero_exit "phoenix_max_cycles rejects 0" remembrall_config_validate "phoenix_max_cycles" "0"
+assert_nonzero_exit "phoenix_max_cycles rejects 100" remembrall_config_validate "phoenix_max_cycles" "100"
+assert_nonzero_exit "phoenix_mode rejects string" remembrall_config_validate "phoenix_mode" "yes"
+
+# ── Cleanup ──────────────────────────────────────────────────────
+rm -rf "$PHOENIX_DIR_TEST" 2>/dev/null
+rm -f "$CTX_DIR/$PHOENIX_CM_SESS" "$CTX_DIR/$PHOENIX_OFF_SESS" "$CTX_DIR/$PHOENIX_CAP_SESS"
+rm -f "/tmp/remembrall-nudges/$PHOENIX_CM_SESS" "/tmp/remembrall-nudges/$PHOENIX_OFF_SESS" "/tmp/remembrall-nudges/$PHOENIX_CAP_SESS"
+rm -f "/tmp/remembrall-avadakedavra/$AK_PHOENIX_SESS" "/tmp/remembrall-avadakedavra/$AK_COMPAT_SESS"
+rm -f "$HOME/.remembrall/config.json" 2>/dev/null || true
+
+# ═══════════════════════════════════════════════════════════════════
+# DYNAMIC CONTEXT WINDOW SUPPORT
+# ═══════════════════════════════════════════════════════════════════
+echo ""
+echo "=== Dynamic Context Window Support ==="
+
+# ── remembrall_context_window ────────────────────────────────────
+echo ""
+echo "remembrall_context_window:"
+
+CTX_WIN_SESS="test-window-sess"
+CTX_WIN_DIR="/tmp/claude-context-pct"
+mkdir -p "$CTX_WIN_DIR"
+
+# No model file → 200000 default
+rm -f "$CTX_WIN_DIR/${CTX_WIN_SESS}.model"
+R=$(remembrall_context_window "$CTX_WIN_SESS")
+assert_eq "no model file returns 200000" "200000" "$R"
+
+# Empty session_id → 200000
+R=$(remembrall_context_window "")
+assert_eq "empty session returns 200000" "200000" "$R"
+
+# "1M context" → 1000000
+printf "Opus 4.6 (1M context)" > "$CTX_WIN_DIR/${CTX_WIN_SESS}.model"
+R=$(remembrall_context_window "$CTX_WIN_SESS")
+assert_eq "1M display name → 1000000" "1000000" "$R"
+
+# "200K" → 200000
+printf "Opus 4.6 (200K)" > "$CTX_WIN_DIR/${CTX_WIN_SESS}.model"
+R=$(remembrall_context_window "$CTX_WIN_SESS")
+assert_eq "200K display name → 200000" "200000" "$R"
+
+# Future-proof: "2M context" → 2000000
+printf "Opus 5 (2M context)" > "$CTX_WIN_DIR/${CTX_WIN_SESS}.model"
+R=$(remembrall_context_window "$CTX_WIN_SESS")
+assert_eq "2M display name → 2000000" "2000000" "$R"
+
+# Future-proof: "500K" → 500000
+printf "Sonnet 5 (500K context)" > "$CTX_WIN_DIR/${CTX_WIN_SESS}.model"
+R=$(remembrall_context_window "$CTX_WIN_SESS")
+assert_eq "500K display name → 500000" "500000" "$R"
+
+# No size in display name → 200000 fallback
+printf "Opus 4.6" > "$CTX_WIN_DIR/${CTX_WIN_SESS}.model"
+R=$(remembrall_context_window "$CTX_WIN_SESS")
+assert_eq "no size in name → 200000" "200000" "$R"
+
+# Case insensitive: "1m"
+printf "Sonnet 4.6 (1m context)" > "$CTX_WIN_DIR/${CTX_WIN_SESS}.model"
+R=$(remembrall_context_window "$CTX_WIN_SESS")
+assert_eq "lowercase 1m → 1000000" "1000000" "$R"
+
+# Cleanup
+rm -f "$CTX_WIN_DIR/${CTX_WIN_SESS}" "$CTX_WIN_DIR/${CTX_WIN_SESS}.model"
+
+# ── remembrall_scale_threshold ───────────────────────────────────
+echo ""
+echo "remembrall_scale_threshold (formula-based):"
+
+# 200K window: unchanged
+R=$(remembrall_scale_threshold 65 200000)
+assert_eq "200K: 65% unchanged" "65" "$R"
+
+R=$(remembrall_scale_threshold 35 200000)
+assert_eq "200K: 35% unchanged" "35" "$R"
+
+# 1M window: (200K/1M)^0.25 ≈ 0.669 → 65×0.669 ≈ 42
+R=$(remembrall_scale_threshold 65 1000000)
+assert_eq "1M: 65% → 42% (4th-root)" "42" "$R"
+
+R=$(remembrall_scale_threshold 35 1000000)
+assert_eq "1M: 35% → 23% (4th-root)" "23" "$R"
+
+R=$(remembrall_scale_threshold 25 1000000)
+assert_eq "1M: 25% → 16% (4th-root)" "16" "$R"
+
+# 2M window: (200K/2M)^0.25 ≈ 0.562 → 65×0.562 ≈ 35
+R=$(remembrall_scale_threshold 65 2000000)
+assert_eq "2M: 65% → 35% (4th-root)" "35" "$R"
+
+R=$(remembrall_scale_threshold 25 2000000)
+assert_eq "2M: 25% → 13% (4th-root)" "13" "$R"
+
+# 500K window: (200K/500K)^0.25 ≈ 0.795 → 65×0.795 ≈ 51
+R=$(remembrall_scale_threshold 65 500000)
+assert_eq "500K: 65% → 51% (4th-root)" "51" "$R"
+
+# ── remembrall_default_content_max (formula-based) ────────────────
+echo ""
+echo "remembrall_default_content_max (formula-based):"
+
+# 200K legacy defaults (exact values preserved)
+R=$(remembrall_default_content_max "claude-opus-4-6" 200000)
+assert_eq "opus 200K = legacy 358400" "358400" "$R"
+
+R=$(remembrall_default_content_max "claude-opus-4-6")
+assert_eq "opus no param = legacy 358400" "358400" "$R"
+
+# 1M: formula = 1000000 * 42 * 42 / 1000 = 1764000
+R=$(remembrall_default_content_max "claude-opus-4-6" 1000000)
+assert_eq "opus 1M = 1764000" "1764000" "$R"
+
+# 1M Sonnet: 1000000 * 40 * 42 / 1000 = 1680000
+R=$(remembrall_default_content_max "claude-sonnet-4-6" 1000000)
+assert_eq "sonnet 1M = 1680000" "1680000" "$R"
+
+# 2M Opus: 2000000 * 42 * 42 / 1000 = 3528000
+R=$(remembrall_default_content_max "claude-opus-4-6" 2000000)
+assert_eq "opus 2M = 3528000" "3528000" "$R"
+
+# 500K Opus: 500000 * 42 * 42 / 1000 = 882000
+R=$(remembrall_default_content_max "claude-opus-4-6" 500000)
+assert_eq "opus 500K = 882000" "882000" "$R"
+
+# ── remembrall_detect_model (window param) ───────────────────────
+echo ""
+echo "remembrall_detect_model (window param):"
+
+WIN_MODEL_TRANSCRIPT="$TMPDIR_ROOT/win_model_transcript.jsonl"
+echo '{"type":"assistant","message":{"model":"claude-opus-4-6","content":[{"type":"text","text":"hello"}]}}' > "$WIN_MODEL_TRANSCRIPT"
+
+# Default 200K
+R=$(remembrall_detect_model "$WIN_MODEL_TRANSCRIPT")
+WIN_WINDOW=$(printf '%s' "$R" | cut -f2)
+assert_eq "default opus window=200000" "200000" "$WIN_WINDOW"
+
+# Explicit 200K
+R=$(remembrall_detect_model "$WIN_MODEL_TRANSCRIPT" 200000)
+WIN_WINDOW=$(printf '%s' "$R" | cut -f2)
+assert_eq "explicit 200K window" "200000" "$WIN_WINDOW"
+
+# 1M
+R=$(remembrall_detect_model "$WIN_MODEL_TRANSCRIPT" 1000000)
+WIN_WINDOW=$(printf '%s' "$R" | cut -f2)
+WIN_MAXKB=$(printf '%s' "$R" | cut -f4)
+assert_eq "1M window passthrough" "1000000" "$WIN_WINDOW"
+# max_kb = 1000000 * 42 * 2 / 10240 = 8203
+assert_eq "1M max_kb derived" "8203" "$WIN_MAXKB"
+
+# 2M
+R=$(remembrall_detect_model "$WIN_MODEL_TRANSCRIPT" 2000000)
+WIN_WINDOW=$(printf '%s' "$R" | cut -f2)
+assert_eq "2M window passthrough" "2000000" "$WIN_WINDOW"
+
+# ── Standing instruction anti-handoff ────────────────────────────
+echo ""
+echo "Standing instruction:"
+
+STANDING_FILE="$PLUGIN_ROOT/hooks/session-resume.sh"
+if grep -q "Do NOT voluntarily suggest handoffs" "$STANDING_FILE" 2>/dev/null; then
+  printf "${GREEN}  PASS${RESET} standing instruction includes anti-handoff language\n"
+  PASS=$((PASS + 1))
+else
+  printf "${RED}  FAIL${RESET} standing instruction missing anti-handoff language\n"
+  FAIL=$((FAIL + 1))
+  ERRORS="${ERRORS}\n  - standing instruction missing anti-handoff language"
+fi
+
+# ── Context monitor dynamic threshold scaling ────────────────────
+echo ""
+echo "Context monitor dynamic scaling:"
+
+CM_DYN_SESS="test-dyn-cm-sess"
+CTX_DIR="/tmp/claude-context-pct"
+mkdir -p "$CTX_DIR"
+
+CM_DYN_CWD="$TMPDIR_ROOT/test-dyn-cwd"
+mkdir -p "$CM_DYN_CWD"
+rm -f "$HOME/.remembrall/config.json" 2>/dev/null || true
+
+# 1M context at 50%: journal scaled to 42% (fourth-root), so 50 > 42 → no nudge
+echo "50" > "$CTX_DIR/$CM_DYN_SESS"
+printf "Opus 4.6 (1M context)" > "$CTX_DIR/${CM_DYN_SESS}.model"
+rm -f "/tmp/remembrall-nudges/$CM_DYN_SESS"
+CM_DYN_INPUT=$(jq -n --arg sid "$CM_DYN_SESS" --arg cwd "$CM_DYN_CWD" '{session_id: $sid, cwd: $cwd, transcript_path: ""}')
+CM_DYN_OUTPUT=$(echo "$CM_DYN_INPUT" | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null) || CM_DYN_OUTPUT=""
+assert_eq "1M at 50%: no nudge (journal scaled to 42%)" "" "$CM_DYN_OUTPUT"
+
+# 1M context at 40%: journal=42%, so 40 < 42 → journal nudge
+echo "40" > "$CTX_DIR/$CM_DYN_SESS"
+rm -f "/tmp/remembrall-nudges/$CM_DYN_SESS"
+CM_DYN_OUTPUT=$(echo "$CM_DYN_INPUT" | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null) || CM_DYN_OUTPUT=""
+assert_match "1M at 40%: journal nudge fires (below 42%)" "REMEMBRALL" "$CM_DYN_OUTPUT"
+
+# 200K context at 30%: no model file, journal stays 65%, so 30 < 65 → journal nudge
+CM_200K_SESS="test-200k-cm-sess"
+echo "30" > "$CTX_DIR/$CM_200K_SESS"
+rm -f "$CTX_DIR/${CM_200K_SESS}.model"
+rm -f "/tmp/remembrall-nudges/$CM_200K_SESS"
+CM_200K_INPUT=$(jq -n --arg sid "$CM_200K_SESS" --arg cwd "$CM_DYN_CWD" '{session_id: $sid, cwd: $cwd, transcript_path: ""}')
+CM_200K_OUTPUT=$(echo "$CM_200K_INPUT" | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null) || CM_200K_OUTPUT=""
+assert_match "200K at 30%: nudge fires (below 65%)" "REMEMBRALL" "$CM_200K_OUTPUT"
+
+# Cleanup
+rm -f "$CTX_DIR/$CM_DYN_SESS" "$CTX_DIR/${CM_DYN_SESS}.model"
+rm -f "$CTX_DIR/$CM_200K_SESS"
+rm -f "/tmp/remembrall-nudges/$CM_DYN_SESS" "/tmp/remembrall-nudges/$CM_200K_SESS"
 
 # ═══════════════════════════════════════════════════════════════════
 echo ""

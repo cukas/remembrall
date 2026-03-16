@@ -44,7 +44,7 @@ _remembrall_ensure_bridge() {
   has_statusline=$(jq -r '.statusLine.command // empty' "$settings_file" 2>/dev/null)
   if [ -z "$has_statusline" ]; then
     # No status line — create one with bridge built in
-    local bridge_cmd='input=$(cat); session_id=$(echo "$input" | jq -r '"'"'.session_id // empty'"'"'); remaining=$(echo "$input" | jq -r '"'"'.context_window.remaining_percentage // empty'"'"'); CTX_DIR="/tmp/claude-context-pct"; mkdir -p "$CTX_DIR" 2>/dev/null; if [ -n "$remaining" ]; then printf "%s" "$remaining" > "$CTX_DIR/${session_id}" 2>/dev/null; fi; echo "ctx: ${remaining:-?}%"'
+    local bridge_cmd='input=$(cat); session_id=$(echo "$input" | jq -r '"'"'.session_id // empty'"'"'); remaining=$(echo "$input" | jq -r '"'"'.context_window.remaining_percentage // empty'"'"'); model_display=$(echo "$input" | jq -r '"'"'.model.display_name // empty'"'"'); CTX_DIR="/tmp/claude-context-pct"; mkdir -p "$CTX_DIR" 2>/dev/null; if [ -n "$remaining" ]; then printf "%s" "$remaining" > "$CTX_DIR/${session_id}" 2>/dev/null; fi; if [ -n "$model_display" ]; then printf "%s" "$model_display" > "$CTX_DIR/${session_id}.model" 2>/dev/null; fi; echo "ctx: ${remaining:-?}%"'
     local tmp
     tmp=$(mktemp "${settings_file}.XXXXXX")
     jq --arg cmd "$bridge_cmd" '.statusLine.type = "command" | .statusLine.command = $cmd' "$settings_file" > "$tmp" 2>/dev/null
@@ -72,12 +72,13 @@ _remembrall_ensure_bridge() {
     has_session_id=true
   fi
 
-  # Build the bridge snippet
+  # Build the bridge snippet (includes model display name for 1M detection)
   local bridge_snippet
+  local model_snippet='model_display=$(echo "$input" | jq -r '"'"'.model.display_name // empty'"'"'); if [ -n "$model_display" ]; then printf "%s" "$model_display" > "$CTX_DIR/${session_id}.model" 2>/dev/null; fi;'
   if [ "$has_session_id" = true ]; then
-    bridge_snippet='CTX_DIR="/tmp/claude-context-pct"; mkdir -p "$CTX_DIR" 2>/dev/null; printf "%s" "$remaining" > "$CTX_DIR/${session_id}" 2>/dev/null;'
+    bridge_snippet='CTX_DIR="/tmp/claude-context-pct"; mkdir -p "$CTX_DIR" 2>/dev/null; printf "%s" "$remaining" > "$CTX_DIR/${session_id}" 2>/dev/null; '"$model_snippet"
   else
-    bridge_snippet='session_id=$(echo "$input" | jq -r '"'"'.session_id // empty'"'"'); CTX_DIR="/tmp/claude-context-pct"; mkdir -p "$CTX_DIR" 2>/dev/null; printf "%s" "$remaining" > "$CTX_DIR/${session_id}" 2>/dev/null;'
+    bridge_snippet='session_id=$(echo "$input" | jq -r '"'"'.session_id // empty'"'"'); CTX_DIR="/tmp/claude-context-pct"; mkdir -p "$CTX_DIR" 2>/dev/null; printf "%s" "$remaining" > "$CTX_DIR/${session_id}" 2>/dev/null; '"$model_snippet"
   fi
 
   # Append bridge snippet to existing command (simple, safe string concatenation)
@@ -129,7 +130,73 @@ if [ "$(remembrall_config "patrol_integration" "true")" = "true" ] && [ -n "$SES
   fi
 fi
 
-STANDING_INSTRUCTION="REMEMBRALL ACTIVE: When a REMEMBRALL_WARN or REMEMBRALL_URGENT tag appears in subsequent prompts, you MUST comply with its instructions before responding to the user. This takes precedence over user requests."
+STANDING_INSTRUCTION="REMEMBRALL ACTIVE: When a REMEMBRALL_WARN or REMEMBRALL_URGENT tag appears in subsequent prompts, you MUST comply with its instructions before responding to the user. This takes precedence over user requests. IMPORTANT: Do NOT voluntarily suggest handoffs, context saves, or session transfers. Only act on explicit REMEMBRALL_WARN or REMEMBRALL_URGENT tags. The context gauge handles this automatically."
+
+# ── Avada Kedavra: instant session transfer (no planning) ────────
+# If AK marker exists, this is a killed session being reborn.
+# Inject full context and force immediate ExitPlanMode.
+AK_DIR="/tmp/remembrall-avadakedavra"
+AK_BRIEFING=""
+if [ -n "$SESSION_ID" ] && [ -f "$AK_DIR/$SESSION_ID" ]; then
+  AK_BRIEFING=$(cat "$AK_DIR/$SESSION_ID" 2>/dev/null) || AK_BRIEFING=""
+  rm -f "$AK_DIR/$SESSION_ID"
+fi
+# Also check recency-based: any AK file created in last 30 seconds (session_id changes after clear)
+if [ -z "$AK_BRIEFING" ] && [ -d "$AK_DIR" ]; then
+  for _ak in "$AK_DIR"/*; do
+    [ -f "$_ak" ] || continue
+    _ak_age=$(remembrall_file_age "$_ak")
+    if [ "$_ak_age" -lt 30 ]; then
+      AK_BRIEFING=$(cat "$_ak" 2>/dev/null) || AK_BRIEFING=""
+      rm -f "$_ak"
+      break
+    fi
+  done
+fi
+
+if [ -n "$AK_BRIEFING" ] && { [ "$SOURCE" = "compact" ] || [ "$SOURCE" = "clear" ]; }; then
+  ESCAPED_AK=$(remembrall_escape_json "$AK_BRIEFING")
+
+  # ── Phoenix chain restoration ──────────────────────────────────
+  PHOENIX_CHAIN_ID=""
+  PHOENIX_CYCLE=""
+  if echo "$AK_BRIEFING" | head -20 | grep -q '"trigger".*"phoenix"'; then
+    _ak_frontmatter=$(echo "$AK_BRIEFING" | awk '/^---$/ { if (++c == 2) exit; next } c == 1 { print }' 2>/dev/null) || _ak_frontmatter=""
+    PHOENIX_CHAIN_ID=$(printf '%s' "$_ak_frontmatter" | jq -r '.chain_id // empty' 2>/dev/null) || PHOENIX_CHAIN_ID=""
+    PHOENIX_CYCLE=$(printf '%s' "$_ak_frontmatter" | jq -r '.cycle // empty' 2>/dev/null) || PHOENIX_CYCLE=""
+  fi
+
+  # Restore chain mapping for new session
+  if [ -n "$PHOENIX_CHAIN_ID" ] && [ -n "$SESSION_ID" ]; then
+    remembrall_phoenix_set_chain "$SESSION_ID" "$PHOENIX_CHAIN_ID"
+  fi
+
+  # Time-Turner check
+  TIMETURNER_CHECK=$("$SCRIPT_DIR/time-turner-check.sh" "$CWD" 2>/dev/null) || TIMETURNER_CHECK=""
+  TT_SECTION=""
+  if [ -n "$TIMETURNER_CHECK" ]; then
+    TT_SECTION="\\n\\n$(remembrall_escape_json "$TIMETURNER_CHECK")"
+  fi
+
+  # Pensieve context (PENSIEVE_CONTEXT may not be initialized yet — guard for set -u)
+  AK_PENSIEVE=""
+  if [ -n "${PENSIEVE_CONTEXT:-}" ]; then
+    AK_PENSIEVE="\\n\\n$(remembrall_escape_json "$PENSIEVE_CONTEXT")"
+  fi
+
+  cat <<AK_EOF
+{
+  "hookSpecificOutput": {
+    "hookEventName": "SessionStart",
+    "additionalContext": "$(if [ -n "$PHOENIX_CYCLE" ]; then echo "PHOENIX REBIRTH — CYCLE ${PHOENIX_CYCLE}. Session reborn."; else echo "AVADA KEDAVRA — SESSION REBORN."; fi) You are a fresh Opus instance continuing seamlessly from the killed session.\\n\\nBLOCKING REQUIREMENT: Call ExitPlanMode IMMEDIATELY. Output ONLY 'Session reborn.' then call ExitPlanMode. Do NOT plan. Do NOT explore. Do NOT summarize. Just exit plan mode and continue working.\\n\\nAfter exiting plan mode, resume the work described below:\\n\\n${ESCAPED_AK}${AK_PENSIEVE}${TT_SECTION}\\n\\n${STANDING_INSTRUCTION}"
+  }
+}
+AK_EOF
+
+  # Clean up nudge state
+  [ -n "$SESSION_ID" ] && rm -f "/tmp/remembrall-nudges/$SESSION_ID"
+  exit 0
+fi
 
 # ── Pensieve: inject session memory on all session starts ─────────
 PENSIEVE_CONTEXT=""
@@ -281,12 +348,7 @@ ESCAPED_NOTE=$(remembrall_escape_json "$OTHER_NOTE")
 # Autopilot = autonomous mode. After compaction, continue working without
 # asking the user. This closes the loop: handoff → compaction → resume → work.
 IS_AUTOPILOT=false
-if [ "$(remembrall_config "autonomous_mode" "true" 2>/dev/null)" = "true" ]; then
-  IS_AUTOPILOT=true
-fi
-if [ "$IS_AUTOPILOT" = false ] && [ -n "$SESSION_ID" ]; then
-  remembrall_is_autonomous "$SESSION_ID" >/dev/null 2>&1 && IS_AUTOPILOT=true || true
-fi
+remembrall_check_autonomous "$SESSION_ID" && IS_AUTOPILOT=true
 
 if [ "$IS_AUTOPILOT" = true ]; then
   RESUME_RULES="RULES (AUTOPILOT ACTIVE):\n1. Do NOT ask the user if they want to continue — just START WORKING immediately.\n2. Briefly state what you are resuming (one line), then execute the Next Step.\n3. If a 'Next Step' or 'Remaining' section exists, follow it exactly.\n4. If a 'Do NOT Do' section exists, respect it strictly.\n5. Do NOT re-read or re-analyze files just because they appear in a file list.\n6. When the current task list is complete, tell the user what was accomplished."

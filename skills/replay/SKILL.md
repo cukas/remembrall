@@ -20,6 +20,7 @@ The handoff file is a **single-use baton**. Read it, verify state, restore patch
    CWD=$(pwd)
    HANDOFF_DIR=$(remembrall_handoff_dir "$CWD")
    TEAM_DIR=$(remembrall_team_handoff_dir "$CWD")
+   FALLBACK_DIRS=""
    # Session ID: env var or published by hook
    OWN_SID="${CLAUDE_SESSION_ID:-$(remembrall_read_session_id "$CWD" 2>/dev/null)}"
    echo "Personal: $HANDOFF_DIR"
@@ -31,10 +32,26 @@ The handoff file is a **single-use baton**. Read it, verify state, restore patch
    fi
    # List all available
    ls -lt "$HANDOFF_DIR"/handoff-*.md "$TEAM_DIR"/handoff-*.md 2>/dev/null || echo "No handoffs found"
+   # Fallback: hash lookup missed (path bug, symlink path, or running /replay from a parent dir)
+   if ! compgen -G "$HANDOFF_DIR/handoff-*.md" >/dev/null; then
+     FALLBACK_DIRS=$(remembrall_replay_fallback_dirs "$CWD" 2>/dev/null || true)
+     if [ -n "$FALLBACK_DIRS" ]; then
+       echo "Fallback dirs:"
+       printf '%s\n' "$FALLBACK_DIRS"
+       HANDOFF_DIR=$(printf '%s\n' "$FALLBACK_DIRS" | head -1)
+       TEAM_DIR="$HANDOFF_DIR"
+       if [ -n "$OWN_SID" ] && [ -f "$HANDOFF_DIR/handoff-${OWN_SID}.md" ]; then
+         echo "OWN SESSION HANDOFF (fallback): $HANDOFF_DIR/handoff-${OWN_SID}.md"
+       fi
+       ls -lt "$HANDOFF_DIR"/handoff-*.md 2>/dev/null || true
+     fi
+   fi
    ```
 
    - **0 files:** Tell the user: "No handoff found. Nothing to replay."
    - **Own session file found:** Use it directly.
+   - **No exact hash match, one fallback dir:** Use that directory and repeat the own-session check there.
+   - **No exact hash match, multiple fallback dirs:** List the newest handoff from each matching directory and ask the user which project/session to replay.
    - **Only other sessions' files:** List them with timestamps. **Ask the user** which one to replay before consuming — these belong to other Claude instances.
    - **Multiple including own:** Use own session's handoff, mention others exist.
 

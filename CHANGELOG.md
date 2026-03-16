@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [3.1.0] - 2026-03-14 — "Phoenix Rebirth"
+
+### Added
+- **Phoenix Rebirth** — Recurring context recycling. When context hits the urgent threshold with Phoenix enabled, state is captured and recycling triggers automatically. After compaction, the cycle rearms — zero clicks, indefinite continuation. Safety-capped at `phoenix_max_cycles` (default 10)
+  - `phoenix_mode` config (default `false`) — opt-in toggle, also available via `/phoenix`
+  - `phoenix_max_cycles` config (default `10`) — safety cap per chain
+  - Phoenix chain tracking in `/tmp/remembrall-phoenix/` — chain ID, cycle count, lineage
+  - Extended `avadakedavra-capture.sh` with `--trigger`, `--cycle`, `--chain-id` args
+  - Chain ID restoration on session resume — cycles persist across compactions
+  - `/phoenix` command — toggle on/off, view chain status
+
 ## [3.0.0] - 2026-03-13 — "The Session Never Dies"
 
 ### Added

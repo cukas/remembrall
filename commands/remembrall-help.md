@@ -15,6 +15,7 @@ Show the user this reference:
 | `/remembrall-help` | This help — list all commands, skills, and config |
 | `/setup-remembrall` | One-time setup — status-line bridge and config |
 | `/autonomous` | Toggle autonomous mode on/off |
+| `/phoenix` | Toggle Phoenix mode on/off — recurring context recycling |
 | `/map` | The Marauder's Map — visual session overview |
 | `/lineage` | Session ancestry DAG — see how sessions branch and chain |
 | `/insights` | Ambient learning — file hotspots, patterns, recurring errors |
@@ -60,6 +61,8 @@ Show the user this reference:
 | `budget_memory` | `20` | Target % for memory/system content |
 | `patrol_integration` | `true` | Listen for Patrol signal files |
 | `patrol_signal_ttl` | `300` | Signal expiry in seconds |
+| `phoenix_mode` | `false` | Recurring context recycling at urgent threshold |
+| `phoenix_max_cycles` | `10` | Max Phoenix cycles per chain (safety cap) |
 
 ## How Context Management Works
 
@@ -68,6 +71,7 @@ Show the user this reference:
  60% ████████████░░░░░░░░  — nudge: suggests /handoff (Obliviate + Budget warnings)
  35% ███████░░░░░░░░░░░░░  — warning: /handoff then EnterPlanMode
  30% ██████░░░░░░░░░░░░░░  — Time-Turner spawns parallel agent (if enabled)
+ 25% ─────░░░░░░░░░░░░░░░░░  — Phoenix: auto-capture + recycle (if enabled, repeating)
  15% ███░░░░░░░░░░░░░░░░░  — urgent: two-stage escalation
   0% ░░░░░░░░░░░░░░░░░░░░  — auto-compaction safety net fires
 ```
@@ -87,3 +91,5 @@ Show the user this reference:
 **Budget** (`/budget`, opt-in): Categorizes transcript into code/conversation/memory. Warns when any category exceeds its configured allocation.
 
 **Patrol Integration** (auto if Patrol installed): Listens for signal files from Patrol. Supports handoff triggers and context alerts. Owl Post theme.
+
+**Phoenix Rebirth** (opt-in: `phoenix_mode: true`): At the urgent threshold, automatically captures state and triggers context recycling. The cycle rearms after compaction — zero clicks, indefinite continuation. Safety-capped at `phoenix_max_cycles` (default 10). Falls through to normal AK when cap is reached.

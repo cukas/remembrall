@@ -51,12 +51,7 @@ if [ "$(remembrall_config "patrol_integration" "true")" = "true" ] && [ -n "$SES
         ) &
       fi
       PATROL_REASON=$(echo "$SIGNAL_PAYLOAD" | jq -r '.reason // "Patrol requested handoff"' 2>/dev/null) || PATROL_REASON="Patrol requested handoff"
-      jq -n --arg reason "$PATROL_REASON" '{
-        hookSpecificOutput: {
-          hookEventName: "UserPromptSubmit",
-          additionalContext: ("REMEMBRALL: Owl Post from Patrol — " + $reason + ". Run /handoff to save progress.")
-        }
-      }'
+      remembrall_emit_hook "UserPromptSubmit" "REMEMBRALL: Owl Post from Patrol — ${PATROL_REASON}. Run /handoff to save progress."
       exit 0
     elif [ "$PATROL_SIGNAL" = "context_alert" ]; then
       remembrall_debug "patrol signal: context_alert"
@@ -69,12 +64,7 @@ if [ "$(remembrall_config "patrol_integration" "true")" = "true" ] && [ -n "$SES
         echo "skip" > "/tmp/remembrall-timeturner/${SESSION_ID}-skip"
       fi
       if [ -n "$PATROL_MSG" ]; then
-        jq -n --arg msg "$PATROL_MSG" '{
-          hookSpecificOutput: {
-            hookEventName: "UserPromptSubmit",
-            additionalContext: ("REMEMBRALL: Owl Post from Patrol — " + $msg)
-          }
-        }'
+        remembrall_emit_hook "UserPromptSubmit" "REMEMBRALL: Owl Post from Patrol — ${PATROL_MSG}"
         exit 0
       fi
     fi
@@ -112,14 +102,7 @@ if [ "$BRIDGE_ACTIVE" = false ]; then
       true  # No action needed — settings.json bridge will activate naturally
     else
       # No bridge in settings — request Claude to write it manually (one-time, ~20 tokens)
-      cat << BOOTSTRAP_EOF
-{
-  "hookSpecificOutput": {
-    "hookEventName": "UserPromptSubmit",
-    "additionalContext": "Write your context remaining % as an integer to /tmp/claude-context-pct/${SESSION_ID}"
-  }
-}
-BOOTSTRAP_EOF
+      remembrall_emit_hook "UserPromptSubmit" "Write your context remaining % as an integer to /tmp/claude-context-pct/${SESSION_ID}"
       exit 0
     fi
   fi
@@ -140,11 +123,14 @@ if [ -z "$REMAINING" ]; then
   ESTIMATED=" (estimated)"
 fi
 
-# ── Configurable thresholds ───────────────────────────────────────
-THRESHOLD_JOURNAL=$(remembrall_threshold "journal" 65)
-THRESHOLD_WARNING=$(remembrall_threshold "warning" 35)
-THRESHOLD_URGENT=$(remembrall_threshold "urgent" 25)
-THRESHOLD_TIMETURNER=$(remembrall_threshold "timeturner" 30)
+# ── Context window detection (auto-adapts to any size) ───────────
+CONTEXT_WINDOW=$(remembrall_context_window "$SESSION_ID")
+
+# ── Configurable thresholds (auto-scaled by window size) ─────────
+THRESHOLD_JOURNAL=$(remembrall_scale_threshold "$(remembrall_threshold "journal" 65)" "$CONTEXT_WINDOW")
+THRESHOLD_WARNING=$(remembrall_scale_threshold "$(remembrall_threshold "warning" 35)" "$CONTEXT_WINDOW")
+THRESHOLD_URGENT=$(remembrall_scale_threshold "$(remembrall_threshold "urgent" 25)" "$CONTEXT_WINDOW")
+THRESHOLD_TIMETURNER=$(remembrall_scale_threshold "$(remembrall_threshold "timeturner" 30)" "$CONTEXT_WINDOW")
 
 # Nudge tracking — don't spam every prompt
 NUDGE_DIR="/tmp/remembrall-nudges"
@@ -175,7 +161,7 @@ CONTENT_BYTES=""
 MODEL_NAME=""
 if [ -n "$TRANSCRIPT_PATH" ] && [ -f "$TRANSCRIPT_PATH" ]; then
   CONTENT_BYTES=$(remembrall_extract_content_bytes "$TRANSCRIPT_PATH" 2>/dev/null)
-  _model_info=$(remembrall_detect_model "$TRANSCRIPT_PATH")
+  _model_info=$(remembrall_detect_model "$TRANSCRIPT_PATH" "$CONTEXT_WINDOW")
   MODEL_NAME=$(printf '%s' "$_model_info" | cut -f1)
 fi
 
@@ -205,7 +191,7 @@ if [ -n "$TRANSCRIPT_PATH" ] && [ -f "$TRANSCRIPT_PATH" ]; then
       # Get content_max for prompts-until-threshold calculation
       _content_max=$(remembrall_calibrated_content_max "$TRANSCRIPT_PATH" 2>/dev/null)
       if [ -z "$_content_max" ] || [ "$_content_max" -eq 0 ] 2>/dev/null; then
-        _content_max=$(remembrall_default_content_max "$MODEL_NAME")
+        _content_max=$(remembrall_default_content_max "$MODEL_NAME" "$CONTEXT_WINDOW")
       fi
       PROMPTS_LEFT=$(remembrall_prompts_until_threshold "$CONTENT_BYTES" "$AVG_GROWTH" "$_content_max" "$THRESHOLD_URGENT" 2>/dev/null)
       if [ -n "$PROMPTS_LEFT" ] && [ "$PROMPTS_LEFT" -gt 0 ] 2>/dev/null; then
@@ -275,14 +261,7 @@ if remembrall_gt "$REMAINING" "$THRESHOLD_WARNING"; then
       fi
     fi
   fi
-  cat << EOF
-{
-  "hookSpecificOutput": {
-    "hookEventName": "UserPromptSubmit",
-    "additionalContext": "REMEMBRALL: Context at ${REMAINING}%.${PROMPTS_MSG} Run /handoff when ready to save progress.${OBLIVIATE_MSG}${BUDGET_MSG}${SPELL_LINE}"
-  }
-}
-EOF
+  remembrall_emit_hook "UserPromptSubmit" "REMEMBRALL: Context at ${REMAINING}%.${PROMPTS_MSG} Run /handoff when ready to save progress.${OBLIVIATE_MSG}${BUDGET_MSG}${SPELL_LINE}"
   exit 0
 fi
 
@@ -323,56 +302,65 @@ fi
 
 # ── Detect autonomous mode ──────────────────────────────────────
 IS_AUTONOMOUS=false
-if [ "$(remembrall_config "autonomous_mode" "true")" = "true" ]; then
-  IS_AUTONOMOUS=true
-fi
-if [ "$IS_AUTONOMOUS" = false ] && [ -n "$SESSION_ID" ]; then
-  remembrall_is_autonomous "$SESSION_ID" >/dev/null 2>&1 && IS_AUTONOMOUS=true || true
-fi
+remembrall_check_autonomous "$SESSION_ID" && IS_AUTONOMOUS=true
 
-# At or below urgent threshold — URGENT (safety net if warning was ignored)
+# At or below urgent threshold — URGENT or PHOENIX
 if remembrall_le "$REMAINING" "$THRESHOLD_URGENT"; then
   echo "urgent" > "$NUDGE_FILE"
   _create_preemptive_handoff
 
+  # ── Phoenix Mode: recurring context recycling ──
+  PHOENIX_MODE=$(remembrall_config "phoenix_mode" "false")
+  if [ "$PHOENIX_MODE" = "true" ]; then
+    PHOENIX_MAX=$(remembrall_config "phoenix_max_cycles" "10")
+
+    # Resolve or create chain
+    CHAIN_ID=$(remembrall_phoenix_chain_id "$SESSION_ID")
+    if [ -z "$CHAIN_ID" ]; then
+      CHAIN_ID="phoenix-$(date +%s)-$$"
+      remembrall_phoenix_set_chain "$SESSION_ID" "$CHAIN_ID"
+    fi
+
+    CYCLE=$(remembrall_phoenix_cycle_count "$CHAIN_ID")
+    CYCLE=$((CYCLE + 1))
+
+    # Safety cap: fall through to normal AK if max cycles reached
+    if [ "$CYCLE" -le "$PHOENIX_MAX" ]; then
+      # Capture state (synchronous, <2s)
+      bash "$SCRIPT_DIR/../scripts/avadakedavra-capture.sh" \
+        --cwd "$CWD" --session-id "$SESSION_ID" \
+        --trigger phoenix --cycle "$CYCLE" --chain-id "$CHAIN_ID"
+
+      remembrall_phoenix_increment "$CHAIN_ID"
+      remembrall_phoenix_record "$CHAIN_ID" "$SESSION_ID" "$CYCLE"
+
+      if [ "$IS_AUTONOMOUS" = true ]; then
+        # Autonomous: keep working, compaction handles the rest
+        remembrall_emit_hook "UserPromptSubmit" "REMEMBRALL_URGENT: Phoenix Rebirth cycle ${CYCLE} — context at ${REMAINING}%. State captured. Keep working — auto-compaction will recycle and auto-resume seamlessly."
+      else
+        # Attended: invoke /avadakedavra (capture already done, skill just triggers clear)
+        remembrall_emit_hook "UserPromptSubmit" \
+          "REMEMBRALL_URGENT: Phoenix Rebirth cycle ${CYCLE} — context at ${REMAINING}%. State captured automatically. BLOCKING REQUIREMENT: Invoke /avadakedavra NOW. One click and we continue. Do NOT explain." \
+          "BLOCKING REQUIREMENT: Phoenix Rebirth cycle ${CYCLE}. Context at ${REMAINING}%. Invoke /avadakedavra immediately."
+      fi
+      exit 0
+    fi
+    # else: max cycles exceeded, fall through to normal AK below
+  fi
+
+  # ── Normal AK (phoenix disabled or max cycles exceeded) ──
   if [ "$IS_AUTONOMOUS" = true ]; then
     # Autonomous: handoff + keep working — auto-compaction handles the rest
-    cat << EOF
-{
-  "hookSpecificOutput": {
-    "hookEventName": "UserPromptSubmit",
-    "additionalContext": "REMEMBRALL_URGENT: Context critical (${REMAINING}%). AUTONOMOUS MODE — run /handoff NOW, continue working. Auto-compaction will reset context and auto-resume."
-  }
-}
-EOF
+    remembrall_emit_hook "UserPromptSubmit" "REMEMBRALL_URGENT: Context critical (${REMAINING}%). AUTONOMOUS MODE — run /handoff NOW, continue working. Auto-compaction will reset context and auto-resume."
   else
-    # Normal: handoff + EnterPlanMode — user clicks "Yes, clear context"
-    HANDOFF_DIR=$(remembrall_handoff_dir "$CWD" 2>/dev/null) || HANDOFF_DIR=""
-    HAS_HANDOFF=false
-    if [ -n "$HANDOFF_DIR" ] && [ -n "$SESSION_ID" ]; then
-      [ -f "$HANDOFF_DIR/handoff-${SESSION_ID}.md" ] && HAS_HANDOFF=true
-    fi
-    if [ "$HAS_HANDOFF" = true ]; then
-      cat << EOF
-{
-  "hookSpecificOutput": {
-    "hookEventName": "UserPromptSubmit",
-    "additionalContext": "REMEMBRALL_URGENT: Context critical (${REMAINING}%). Handoff already saved. BLOCKING REQUIREMENT: Call EnterPlanMode NOW. Tell the user: Click 'Yes, clear context' — work auto-resumes. Do NOT instruct user to type /clear or /replay."
-  },
-  "systemMessage": "BLOCKING REQUIREMENT: Context CRITICAL (${REMAINING}%). Handoff saved. Call EnterPlanMode immediately. Do NOT proceed with other tasks."
-}
-EOF
+    # Avada Kedavra: invoke /avadakedavra skill for instant session transfer
+    if [ "$(remembrall_config "easter_eggs" "true")" = "true" ]; then
+      AK_MSG="REMEMBRALL_URGENT: Context critical (${REMAINING}%). Avada Kedavra! BLOCKING REQUIREMENT: Invoke the /avadakedavra skill NOW. Tell the user: 'One click and we continue with fresh context.' Do NOT explain, plan, or summarize. Just invoke the skill."
     else
-      cat << EOF
-{
-  "hookSpecificOutput": {
-    "hookEventName": "UserPromptSubmit",
-    "additionalContext": "REMEMBRALL_URGENT: Context critical (${REMAINING}%). BLOCKING REQUIREMENT: Run /handoff NOW, then call EnterPlanMode. Tell the user: Click 'Yes, clear context' — work auto-resumes. Do NOT instruct user to type /clear or /replay."
-  },
-  "systemMessage": "BLOCKING REQUIREMENT: Context CRITICAL (${REMAINING}%). Run /handoff NOW, then call EnterPlanMode. Do NOT proceed with other tasks."
-}
-EOF
+      AK_MSG="REMEMBRALL_URGENT: Context critical (${REMAINING}%). BLOCKING REQUIREMENT: Invoke the /avadakedavra skill NOW. Tell the user: 'One click and we continue with fresh context.' Do NOT explain, plan, or summarize. Just invoke the skill."
     fi
+    remembrall_emit_hook "UserPromptSubmit" "$AK_MSG" \
+      "BLOCKING REQUIREMENT: Context CRITICAL (${REMAINING}%). Invoke /avadakedavra skill immediately. Do NOT proceed with other tasks."
   fi
   exit 0
 fi
@@ -384,24 +372,9 @@ if [ "$LAST_NUDGE" != "warning" ] && [ "$LAST_NUDGE" != "urgent" ]; then
 fi
 if [ "$IS_AUTONOMOUS" = true ]; then
   # Autonomous: handoff + keep working — auto-compaction handles the rest
-  cat << EOF
-{
-  "hookSpecificOutput": {
-    "hookEventName": "UserPromptSubmit",
-    "additionalContext": "REMEMBRALL_WARN: Context at ${REMAINING}%.${PROMPTS_MSG} AUTONOMOUS MODE — run /handoff NOW, continue working. Auto-compaction will reset context and auto-resume."
-  }
-}
-EOF
+  remembrall_emit_hook "UserPromptSubmit" "REMEMBRALL_WARN: Context at ${REMAINING}%.${PROMPTS_MSG} AUTONOMOUS MODE — run /handoff NOW, continue working. Auto-compaction will reset context and auto-resume."
 else
-  # Normal: handoff + EnterPlanMode — user clicks "Yes, clear context"
-  cat << EOF
-{
-  "hookSpecificOutput": {
-    "hookEventName": "UserPromptSubmit",
-    "additionalContext": "REMEMBRALL_WARN: Context at ${REMAINING}%.${PROMPTS_MSG} BLOCKING REQUIREMENT: Run /handoff NOW, then call EnterPlanMode. Tell the user: Handoff saved — click 'Yes, clear context' to continue with fresh context. Work auto-resumes after clear."
-  },
-  "systemMessage": "BLOCKING REQUIREMENT: Context at ${REMAINING}%. Run /handoff, then call EnterPlanMode immediately. Do NOT instruct the user to type /clear or /replay."
-}
-EOF
+  # Normal: suggest /handoff to save progress — AK fires at urgent threshold
+  remembrall_emit_hook "UserPromptSubmit" "REMEMBRALL_WARN: Context at ${REMAINING}%.${PROMPTS_MSG} Run /handoff to save progress. At ${THRESHOLD_URGENT}% Avada Kedavra will fire automatically."
 fi
 exit 0

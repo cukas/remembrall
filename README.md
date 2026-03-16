@@ -34,6 +34,7 @@ The gauge auto-configures on first session. Run `/setup-remembrall` to customize
 💀 [██░░░░░░░░] 15% Obliviate!   memory wipe incoming — pulsing 🔮↔💀
 🔮 [███░░░░░░░] 28% ⚡ ⏳TT       Time-Turner agent working in parallel
 🔮 [████████░░] 80%    ✅TT       Time-Turner finished — /timeturner merge
+🔮 [████████░░] 80%    🔥P3       Phoenix cycle 3 — session reborn
 ```
 
 <p align="center">
@@ -42,53 +43,51 @@ The gauge auto-configures on first session. Run `/setup-remembrall` to customize
 
 ---
 
-## What's New in v3.0.0
+## Features at a Glance
 
-### The Pensieve — Session Memory That Survives Compaction
+| Feature | Status | What it does |
+|---------|--------|-------------|
+| **Context Monitor** | On by default | Tracks context %, warns at thresholds, triggers handoff |
+| **Auto-Resume** | On by default | Injects handoff state on session restart — seamless continuation |
+| **Pensieve** | On by default | Session memory that survives compaction — files, commands, errors |
+| **Avada Kedavra** | On by default | One-click instant session transfer at critical context |
+| **Phoenix Rebirth** | Opt-in | Recurring AK — auto-captures and recycles indefinitely, zero clicks |
+| **Time-Turner** | Opt-in | Parallel agent in git worktree at low context |
+| **Marauder's Map** | On by default | Visual session overview — files, commands, burn rate |
+| **Session Lineage** | On by default | Full session ancestry DAG with parent/child chains |
+| **Insights** | On by default | Ambient learning — file hotspots, patterns, recurring errors |
+| **Obliviate** | On by default | Semantic memory pruning — detects and archives stale memories |
+| **Context Budget** | Opt-in | Code vs conversation vs memory breakdown with warnings |
+| **Patrol Integration** | Auto | Signal protocol for [Patrol](https://github.com/cukas/patrol) interop |
+| **Autonomous Mode** | Opt-in | Unattended overnight runs — zero human clicks needed |
 
-Tracks every file read/edit, command, and error throughout a session into structured JSONL. When compaction or handoff happens, the raw data is distilled into a summary and injected into the next session. Claude retains structured knowledge of what it did — even across compactions and session resets.
+---
 
-On by default. Config: `pensieve: true`
+## What's New
 
-### Time-Turner — Parallel Agents at Low Context
+### v3.1.0 — "Phoenix Rebirth"
 
-At a configurable threshold (default 30%), spawns a headless `claude -p` agent in a git worktree with remaining tasks. The agent works independently while the main session compacts. On next resume, offers to merge changes via `/timeturner merge`.
+**Recurring context recycling.** When context hits the urgent threshold, Phoenix captures state and triggers recycling automatically. After compaction, the cycle rearms — indefinitely, zero clicks. Same mechanism as Avada Kedavra, but recurring and automatic.
 
-Opt-in only. Config: `time_turner: false`
+```
+Cycle 1: context drains → 25% → Phoenix captures → compaction → resume → rearm
+Cycle 2: context drains → 25% → Phoenix captures → compaction → resume → rearm
+Cycle N: ...keeps going until phoenix_max_cycles (default 10)
+```
 
-### The Marauder's Map — Visual Session Overview
+Toggle with `/phoenix`. Config: `phoenix_mode: false`, `phoenix_max_cycles: 10`
 
-`/map` shows context gauge, files explored with R/E tags, commands with colored exit codes, error counts, burn rate, and Time-Turner status. Built from Pensieve data.
+### v3.0.0 — "The Session Never Dies"
 
-### Session Lineage — Full Session DAG
-
-Every session (main, compacted, Time-Turner) is recorded in a lineage index with parent/child relationships. `/lineage` renders a text DAG showing session ancestry, branches, and merge status.
-
-Config: `lineage: true`, `lineage_max_entries: 50`
-
-### Ambient Learning / Insights — The Pensieve Remembers
-
-Aggregates Pensieve session data into actionable patterns: file hotspots, workflow patterns (test-before-commit), error recurrence, and session statistics. Background aggregation on SessionStart. `/insights` to view.
-
-Config: `insights: true`, `insights_min_sessions: 3`
-
-### Obliviate — Semantic Context Pruning
-
-Memory staleness analyzer that cross-references memory files with Pensieve data. Identifies stale memories not accessed in recent sessions and offers guided pruning. Archives instead of deleting.
-
-Config: `obliviate: true`, `obliviate_stale_sessions: 5`
-
-### Context Budget — The Sorting Hat
-
-Classifies context consumption into code, conversation, and memory categories. Compares actuals vs configured budgets and warns when categories are imbalanced.
-
-Opt-in. Config: `budget_enabled: false`, `budget_code: 50`, `budget_conversation: 30`, `budget_memory: 20`
-
-### Patrol Integration — Owl Post
-
-File-based signal protocol for [Patrol](https://github.com/cukas/patrol) plugin interop. Patrol is fully optional — zero behavior change when not installed. Signal types: `handoff_trigger`, `context_alert`.
-
-Config: `patrol_integration: true`, `patrol_signal_ttl: 300`
+- **The Pensieve** — Session memory that survives compaction. Tracks files, commands, errors into JSONL. Distilled and injected on resume. Config: `pensieve: true`
+- **Time-Turner** — Parallel `claude -p` agent in a git worktree at 30% context. Review with `/timeturner diff`, apply with `/timeturner merge`. Opt-in: `time_turner: false`
+- **Marauder's Map** — `/map` for visual session overview: context gauge, files, commands, errors, burn rate
+- **Session Lineage** — `/lineage` renders a text DAG of session ancestry, branches, Time-Turner merges
+- **Insights** — `/insights` shows file hotspots, workflow patterns, error recurrence across sessions
+- **Obliviate** — `/obliviate` detects stale memories via Pensieve cross-reference, archives with confirmation
+- **Context Budget** — `/budget` categorizes context into code/conversation/memory, warns on imbalance
+- **Patrol Integration** — File-based signal protocol for Patrol plugin. Owl Post theme
+- **Autonomous Mode** — `/autonomous` for overnight runs. Handoff + auto-compaction, no human click needed
 
 ---
 
@@ -120,7 +119,8 @@ Config: `patrol_integration: true`, `patrol_signal_ttl: 300`
 │       │                  │                                          │
 │       │           <=30%? ── Time-Turner spawn (if enabled)           │
 │       │                  │                                          │
-│       │           <=25%? ── URGENT — immediate /handoff + plan mode  │
+│       │           <=25%? ── Phoenix auto-capture + recycle           │
+│       │                  │   (if enabled, else normal AK)            │
 │       │                  ▼                                          │
 │       │            Plan mode: "Yes, clear context"                   │
 │       │                  │                                          │
@@ -128,15 +128,16 @@ Config: `patrol_integration: true`, `patrol_signal_ttl: 300`
 │  + lineage-record.sh     │  ← session DAG tracking                  │
 │  + pensieve-distill.sh   │  ← distill session memory                │
 │       │                  │                                          │
-│  session-resume.sh       │  ← inject handoff + Pensieve memory      │
+│  session-resume.sh       │  ← inject handoff + Pensieve + Phoenix   │
 │  + insights-aggregate.sh │  ← background pattern learning           │
 │  + patrol signal cleanup │  ← consume stale signals                 │
 │       ▼                  │                                          │
 │  Claude resumes with full context + session intelligence            │
+│  Phoenix rearms — next cycle begins automatically                   │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-## Eight Layers of Protection
+## Nine Layers of Protection
 
 1. **Pensieve Memory** (`pensieve-track.sh`) — Continuously tracks file operations, commands, and errors into structured JSONL. Survives compaction. Injected on every session resume.
 
@@ -146,13 +147,15 @@ Config: `patrol_integration: true`, `patrol_signal_ttl: 300`
 
 4. **Time-Turner** (`time-turner-spawn.sh` at 30%) — Spawns a parallel agent in a git worktree with remaining tasks. Works independently while main session compacts.
 
-5. **Urgent Handoff** (`context-monitor.sh` at 25%) — Same as warning but with BLOCKING priority.
+5. **Phoenix Rebirth** (`context-monitor.sh` at 25%) — When enabled, auto-captures state and triggers recycling. Cycle rearms after compaction. Falls through to normal AK when disabled or max cycles reached.
 
-6. **Safety Net** (`precompact-handoff.sh`) — If all nudges are missed and auto-compaction fires, extracts task state from the transcript. Also records the session in the lineage DAG and distills Pensieve data.
+6. **Avada Kedavra** (`context-monitor.sh` at 25%) — One-shot instant session transfer. Always available as fallback when Phoenix is disabled.
 
-7. **Auto-Resume** (`session-resume.sh`) — On session start after compaction or `/clear`, injects handoff + Pensieve memory. Spawns Insights aggregation in background. Cleans stale Patrol signals.
+7. **Safety Net** (`precompact-handoff.sh`) — If all nudges are missed and auto-compaction fires, extracts task state from the transcript. Also records the session in the lineage DAG and distills Pensieve data.
 
-8. **Stop Check** (`stop-check.sh`) — When Claude finishes a task at low context, suggests handoff or `/clear + /replay`.
+8. **Auto-Resume** (`session-resume.sh`) — On session start after compaction or `/clear`, injects handoff + Pensieve memory + Phoenix chain. Spawns Insights aggregation in background. Cleans stale Patrol signals.
+
+9. **Stop Check** (`stop-check.sh`) — When Claude finishes a task at low context, suggests handoff or `/clear + /replay`.
 
 ---
 
@@ -198,6 +201,8 @@ Remembrall uses `~/.remembrall/config.json` for persistent settings. Run `/setup
   "time_turner_model": "sonnet",
   "time_turner_max_budget_usd": 1.00,
   "threshold_timeturner": 30,
+  "phoenix_mode": false,
+  "phoenix_max_cycles": 10,
   "lineage": true,
   "lineage_max_entries": 50,
   "insights": true,
@@ -234,7 +239,7 @@ Remembrall uses `~/.remembrall/config.json` for persistent settings. Run `/setup
 |---------|---------|-------------|
 | `threshold_journal` | `65` | Context % that triggers first "run /handoff" nudge |
 | `threshold_warning` | `35` | Context % that triggers "run /handoff + plan mode" |
-| `threshold_urgent` | `25` | Context % that triggers "IMMEDIATELY" nudge |
+| `threshold_urgent` | `25` | Context % that triggers AK / Phoenix |
 | `threshold_timeturner` | `30` | Context % that triggers Time-Turner spawn |
 
 ### Pensieve Settings
@@ -252,6 +257,13 @@ Remembrall uses `~/.remembrall/config.json` for persistent settings. Run `/setup
 | `time_turner` | `false` | Enable parallel agent spawning at low context |
 | `time_turner_model` | `"sonnet"` | Model for Time-Turner agents |
 | `time_turner_max_budget_usd` | `1.00` | Max budget in USD per Time-Turner agent |
+
+### Phoenix Settings
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `phoenix_mode` | `false` | Enable recurring context recycling at urgent threshold |
+| `phoenix_max_cycles` | `10` | Max Phoenix cycles per chain (safety cap) |
 
 ### Session Lineage Settings
 
@@ -299,6 +311,7 @@ Remembrall uses `~/.remembrall/config.json` for persistent settings. Run `/setup
 | `/remembrall-status` | Diagnostic: check context %, bridge, Pensieve, Lineage, Insights, Budget, Patrol |
 | `/remembrall-help` | List all commands, skills, and config options |
 | `/autonomous` | Toggle autonomous mode on/off for overnight runs |
+| `/phoenix` | Toggle Phoenix mode on/off — recurring context recycling |
 | `/remembrall-uninstall` | Clean removal: bridge, data, temp files (supports `--dry-run`) |
 | `/map` | Visual session overview — files, commands, errors, burn rate, Time-Turner |
 | `/lineage` | Session ancestry DAG — parents, children, branches, Time-Turner merges |
@@ -341,6 +354,10 @@ Remembrall uses `~/.remembrall/config.json` for persistent settings. Run `/setup
   /tmp/remembrall-budget/{session_id}.json            # budget analysis
   /tmp/remembrall-signals/{session_id}/               # Patrol signal files
   /tmp/remembrall-timeturner/{session_id}/            # Time-Turner state
+  /tmp/remembrall-phoenix/                            # Phoenix chain state
+    chain-{session_id}                                # session → chain mapping
+    {chain_id}.cycle                                  # cycle counter
+    {chain_id}.lineage                                # cycle history
 ```
 
 ## Self-Calibrating Context Estimation
@@ -439,6 +456,8 @@ When enabled, handoffs are also saved in your project directory at `.remembrall/
 
 **Time-Turner agent not spawning** — Ensure `time_turner: true` is set in config. Check that `claude` CLI is on PATH and git worktrees are supported in your repo.
 
+**Phoenix not cycling** — Ensure `phoenix_mode: true` in config. Check `/phoenix status` for chain info. Phoenix fires at the same threshold as AK (`threshold_urgent`, default 25%).
+
 **Pensieve not injecting** — Check `pensieve: true` in config. Run `/remembrall-status` to see Pensieve data directory and session count.
 
 **Insights not generating** — Need at least `insights_min_sessions` (default 3) Pensieve sessions. Insights aggregate on SessionStart — start a new session to trigger.
@@ -450,6 +469,8 @@ When enabled, handoffs are also saved in your project directory at `.remembrall/
 **Does Remembrall bloat my context?** No. Nudges are short one-line messages. Pensieve injection is capped at `pensieve_inject_budget` characters (default 2000). There is no accumulated memory that grows over time.
 
 **Is the Time-Turner safe?** Yes. It's opt-in, budget-capped, worktree-isolated, and never auto-merges. You review changes via `/timeturner diff` before merging.
+
+**What's the difference between Phoenix and AK?** Avada Kedavra is a one-shot emergency session transfer. Phoenix wraps AK in a recurring cycle — it captures state, triggers recycling, and rearms automatically after compaction. Same threshold, but Phoenix keeps going indefinitely (up to `phoenix_max_cycles`).
 
 **What does Obliviate actually delete?** Nothing — it archives. Stale memories are moved to `.archive/` in the memory directory. You can restore them manually.
 
