@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [3.1.0] - 2026-03-14 — "Phoenix Rebirth"
+## [3.0.0] - 2026-03-13 — "The Session Never Dies"
 
 ### Added
 - **Phoenix Rebirth** — Recurring context recycling. When context hits the urgent threshold with Phoenix enabled, state is captured and recycling triggers automatically. After compaction, the cycle rearms — zero clicks, indefinite continuation. Safety-capped at `phoenix_max_cycles` (default 10)
@@ -14,10 +14,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - Extended `avadakedavra-capture.sh` with `--trigger`, `--cycle`, `--chain-id` args
   - Chain ID restoration on session resume — cycles persist across compactions
   - `/phoenix` command — toggle on/off, view chain status
-
-## [3.0.0] - 2026-03-13 — "The Session Never Dies"
-
-### Added
 - **The Pensieve** — Compaction-proof session intelligence. Tracks every file read/edit, command, and error throughout a session into structured JSONL. On compaction or handoff, distills into a summary that gets injected into the next session. Claude retains structured knowledge of what it did, even across compactions and session resets. On by default (`pensieve: true`)
   - `hooks/pensieve-track.sh` — Background incremental transcript parser (runs on every prompt)
   - `hooks/pensieve-distill.sh` — Crunches raw JSONL into structured summary JSON

@@ -65,7 +65,7 @@ The gauge auto-configures on first session. Run `/setup-remembrall` to customize
 
 ## What's New
 
-### v3.1.0 — "Phoenix Rebirth"
+### v3.0.0 — "The Session Never Dies"
 
 **Recurring context recycling.** When context hits the urgent threshold, Phoenix captures state and triggers recycling automatically. After compaction, the cycle rearms — indefinitely, zero clicks. Same mechanism as Avada Kedavra, but recurring and automatic.
 
