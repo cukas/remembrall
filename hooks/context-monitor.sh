@@ -226,7 +226,7 @@ if remembrall_gt "$REMAINING" "$THRESHOLD_WARNING"; then
   echo "journal" > "$NUDGE_FILE"
   SPELL_LINE=""
   if [ "$(remembrall_config "easter_eggs" "true")" = "true" ]; then
-    SPELL_LINE=" Spells: Expecto Patronum=/handoff, Lumos=/status, Accio=/replay, Pensieve=/pensieve, Marauder's Map=/map, Time-Turner=/timeturner, Lineage=/lineage, Insights=/insights, Obliviate=/obliviate, Budget=/budget, Prior Incantato=handoff count this session (only if user speaks HP)"
+    SPELL_LINE=" Spells: Expecto Patronum=/handoff, Lumos=/status, Accio=/replay, Pensieve=/pensieve, Marauder's Map=/map, Time-Turner=/timeturner, Lineage=/lineage, Statistics=/statistics, Obliviate=/obliviate, Budget=/budget, Prior Incantato=handoff count this session (only if user speaks HP)"
   fi
   # Obliviate: include stale memory warning if analysis is ready
   OBLIVIATE_MSG=""

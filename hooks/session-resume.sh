@@ -110,9 +110,9 @@ if [ -n "$PLUGIN_VERSION" ] && [ "$PLUGIN_VERSION" != "3.0.0" ]; then
   [ -n "$SESSION_ID" ] && rm -f "/tmp/remembrall-nudges/$SESSION_ID" "/tmp/remembrall-bootstrap/$SESSION_ID" "/tmp/remembrall-growth/$SESSION_ID"
 fi
 
-# ── Insights: spawn background aggregation on SessionStart ───────
-if [ "$(remembrall_config "insights" "true")" = "true" ] && [ -n "$CWD" ]; then
-  ("$SCRIPT_DIR/insights-aggregate.sh" "$CWD" >/dev/null 2>&1) &
+# ── Statistics: spawn background aggregation on SessionStart ─────
+if [ "$(remembrall_config "statistics" "true")" = "true" ] && [ -n "$CWD" ]; then
+  ("$SCRIPT_DIR/statistics-aggregate.sh" "$CWD" >/dev/null 2>&1) &
 fi
 
 # ── Patrol: clean stale signal files on startup ──────────────────

@@ -55,7 +55,7 @@ The gauge auto-configures on first session. Run `/setup-remembrall` to customize
 | **Time-Turner** | Opt-in | Parallel agent in git worktree at low context |
 | **Marauder's Map** | On by default | Visual session overview — files, commands, burn rate |
 | **Session Lineage** | On by default | Full session ancestry DAG with parent/child chains |
-| **Insights** | On by default | Ambient learning — file hotspots, patterns, recurring errors |
+| **Statistics** | On by default | Ambient learning — file hotspots, patterns, recurring errors |
 | **Obliviate** | On by default | Semantic memory pruning — detects and archives stale memories |
 | **Context Budget** | Opt-in | Code vs conversation vs memory breakdown with warnings |
 | **Patrol Integration** | Auto | Signal protocol for [Patrol](https://github.com/cukas/patrol) interop |
@@ -83,7 +83,7 @@ Toggle with `/phoenix`. Config: `phoenix_mode: false`, `phoenix_max_cycles: 10`
 - **Time-Turner** — Parallel `claude -p` agent in a git worktree at 30% context. Review with `/timeturner diff`, apply with `/timeturner merge`. Opt-in: `time_turner: false`
 - **Marauder's Map** — `/map` for visual session overview: context gauge, files, commands, errors, burn rate
 - **Session Lineage** — `/lineage` renders a text DAG of session ancestry, branches, Time-Turner merges
-- **Insights** — `/insights` shows file hotspots, workflow patterns, error recurrence across sessions
+- **Statistics** — `/statistics` shows file hotspots, workflow patterns, error recurrence across sessions
 - **Obliviate** — `/obliviate` detects stale memories via Pensieve cross-reference, archives with confirmation
 - **Context Budget** — `/budget` categorizes context into code/conversation/memory, warns on imbalance
 - **Patrol Integration** — File-based signal protocol for Patrol plugin. Owl Post theme
@@ -129,7 +129,7 @@ Toggle with `/phoenix`. Config: `phoenix_mode: false`, `phoenix_max_cycles: 10`
 │  + pensieve-distill.sh   │  ← distill session memory                │
 │       │                  │                                          │
 │  session-resume.sh       │  ← inject handoff + Pensieve + Phoenix   │
-│  + insights-aggregate.sh │  ← background pattern learning           │
+│  + statistics-aggregate.sh │  ← background pattern learning         │
 │  + patrol signal cleanup │  ← consume stale signals                 │
 │       ▼                  │                                          │
 │  Claude resumes with full context + session intelligence            │
@@ -153,7 +153,7 @@ Toggle with `/phoenix`. Config: `phoenix_mode: false`, `phoenix_max_cycles: 10`
 
 7. **Safety Net** (`precompact-handoff.sh`) — If all nudges are missed and auto-compaction fires, extracts task state from the transcript. Also records the session in the lineage DAG and distills Pensieve data.
 
-8. **Auto-Resume** (`session-resume.sh`) — On session start after compaction or `/clear`, injects handoff + Pensieve memory + Phoenix chain. Spawns Insights aggregation in background. Cleans stale Patrol signals.
+8. **Auto-Resume** (`session-resume.sh`) — On session start after compaction or `/clear`, injects handoff + Pensieve memory + Phoenix chain. Spawns Statistics aggregation in background. Cleans stale Patrol signals.
 
 9. **Stop Check** (`stop-check.sh`) — When Claude finishes a task at low context, suggests handoff or `/clear + /replay`.
 
@@ -205,9 +205,9 @@ Remembrall uses `~/.remembrall/config.json` for persistent settings. Run `/setup
   "phoenix_max_cycles": 10,
   "lineage": true,
   "lineage_max_entries": 50,
-  "insights": true,
-  "insights_inject": false,
-  "insights_min_sessions": 3,
+  "statistics": true,
+  "statistics_inject": false,
+  "statistics_min_sessions": 3,
   "obliviate": true,
   "obliviate_stale_sessions": 5,
   "budget_enabled": false,
@@ -272,13 +272,13 @@ Remembrall uses `~/.remembrall/config.json` for persistent settings. Run `/setup
 | `lineage` | `true` | Track session ancestry in a DAG |
 | `lineage_max_entries` | `50` | Max sessions to keep in the lineage index |
 
-### Insights Settings
+### Statistics Settings
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `insights` | `true` | Enable ambient learning from Pensieve data |
-| `insights_inject` | `false` | Inject insights into session context |
-| `insights_min_sessions` | `3` | Min sessions before generating insights |
+| `statistics` | `true` | Enable ambient learning from Pensieve data |
+| `statistics_inject` | `false` | Inject statistics into session context |
+| `statistics_min_sessions` | `3` | Min sessions before generating statistics |
 
 ### Obliviate Settings
 
@@ -308,14 +308,14 @@ Remembrall uses `~/.remembrall/config.json` for persistent settings. Run `/setup
 | Command | Description |
 |---------|-------------|
 | `/setup-remembrall` | Manual fallback for bridge setup and config customization |
-| `/remembrall-status` | Diagnostic: check context %, bridge, Pensieve, Lineage, Insights, Budget, Patrol |
+| `/remembrall-status` | Diagnostic: check context %, bridge, Pensieve, Lineage, Statistics, Budget, Patrol |
 | `/remembrall-help` | List all commands, skills, and config options |
 | `/autonomous` | Toggle autonomous mode on/off for overnight runs |
 | `/phoenix` | Toggle Phoenix mode on/off — recurring context recycling |
 | `/remembrall-uninstall` | Clean removal: bridge, data, temp files (supports `--dry-run`) |
 | `/map` | Visual session overview — files, commands, errors, burn rate, Time-Turner |
 | `/lineage` | Session ancestry DAG — parents, children, branches, Time-Turner merges |
-| `/insights` | Project insights — file hotspots, workflow patterns, error recurrence |
+| `/statistics` | Project statistics — file hotspots, workflow patterns, error recurrence |
 | `/obliviate` | Review and archive stale memories |
 | `/budget` | Context budget allocation breakdown |
 
@@ -345,8 +345,8 @@ Remembrall uses `~/.remembrall/config.json` for persistent settings. Run `/setup
     session-{session_id}.json                         # distilled summaries
   lineage/{project-name}-{hash8}/
     index.json                                        # session DAG
-  insights/{project-name}-{hash8}/
-    insights.json                                     # aggregated patterns
+  statistics/{project-name}-{hash8}/
+    statistics.json                                   # aggregated patterns
 
 /tmp/remembrall-*/                                    # ephemeral session data
   /tmp/remembrall-nudges/{session_id}                 # nudge state
@@ -392,7 +392,7 @@ These features make Time-Turner cheaper:
 
 1. **Obliviate** prunes stale memories BEFORE TT agents spawn — leaner context, fewer wasted tokens
 2. **Context Budget** keeps the main session within allocation — delays hitting the TT threshold
-3. **Insights** feed targeted tasks to TT agents instead of "continue remaining work"
+3. **Statistics** feed targeted tasks to TT agents instead of "continue remaining work"
 4. **Session Lineage** tracks which TT branches were productive vs wasteful — data for smarter spawning decisions
 5. **Patrol** can suppress TT spawn via `context_alert` signal with `skip_timeturner: true`
 
@@ -460,7 +460,7 @@ When enabled, handoffs are also saved in your project directory at `.remembrall/
 
 **Pensieve not injecting** — Check `pensieve: true` in config. Run `/remembrall-status` to see Pensieve data directory and session count.
 
-**Insights not generating** — Need at least `insights_min_sessions` (default 3) Pensieve sessions. Insights aggregate on SessionStart — start a new session to trigger.
+**Statistics not generating** — Need at least `statistics_min_sessions` (default 3) Pensieve sessions. Statistics aggregate on SessionStart — start a new session to trigger.
 
 **Obliviate shows no stale memories** — Memories must be older than `obliviate_stale_sessions * 2` hours (default 10h). Recent Pensieve references reduce staleness.
 
@@ -486,7 +486,7 @@ Remembrall is fully local. No network requests, no analytics, no telemetry. All 
 - Patches: `~/.remembrall/patches/`
 - Pensieve: `~/.remembrall/pensieve/`
 - Lineage: `~/.remembrall/lineage/`
-- Insights: `~/.remembrall/insights/`
+- Statistics: `~/.remembrall/statistics/`
 - Temp files: `/tmp/remembrall-*/` (cleared on reboot)
 
 ## License

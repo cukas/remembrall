@@ -44,13 +44,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - Config: `lineage` (default true), `lineage_max_entries` (default 50)
   - HP theme: branches = "Horcrux detected"
 
-- **Ambient Learning / Insights (The Pensieve Remembers)** — Aggregates Pensieve session data into actionable patterns. Tracks file hotspots, workflow patterns (test-before-commit), error recurrence, and session statistics. Background aggregation on SessionStart
-  - `hooks/insights-aggregate.sh` — Aggregates Pensieve sessions into patterns (background)
-  - `scripts/remembrall-insights.sh` — Renders formatted insights with HP theming
-  - `commands/insights.md` — `/insights` command
-  - Library: `remembrall_insights_dir()`, `remembrall_insights_fresh()`
-  - Storage: `~/.remembrall/insights/{project-hash}/insights.json`
-  - Config: `insights` (default true), `insights_inject` (default false), `insights_min_sessions` (default 3)
+- **Ambient Learning / Statistics (The Pensieve Remembers)** — Aggregates Pensieve session data into actionable patterns. Tracks file hotspots, workflow patterns (test-before-commit), error recurrence, and session statistics. Background aggregation on SessionStart
+  - `hooks/statistics-aggregate.sh` — Aggregates Pensieve sessions into patterns (background)
+  - `scripts/remembrall-statistics.sh` — Renders formatted statistics with HP theming
+  - `commands/statistics.md` — `/statistics` command
+  - Library: `remembrall_statistics_dir()`, `remembrall_statistics_fresh()`
+  - Storage: `~/.remembrall/statistics/{project-hash}/statistics.json`
+  - Config: `statistics` (default true), `statistics_inject` (default false), `statistics_min_sessions` (default 3)
 
 - **Semantic Context Pruning / Obliviate** — Memory staleness analyzer that cross-references memory files with Pensieve data. Identifies stale memories not accessed in recent sessions and offers guided pruning with user confirmation. Archives stale memories instead of deleting
   - `hooks/obliviate-analyze.sh` — Memory staleness analyzer (background, at journal threshold)
@@ -79,7 +79,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Config validation for all new settings (12 new config keys total)
 - `remembrall_pensieve_dir()` and `remembrall_pensieve_tmp()` library functions
-- Pensieve, Lineage, Insights, Obliviate, Budget, and Patrol data in `remembrall-status.sh` diagnostic output
+- Pensieve, Lineage, Statistics, Obliviate, Budget, and Patrol data in `remembrall-status.sh` diagnostic output
 - Time-Turner status in `remembrall-status.sh` diagnostic output
 - All new feature cleanup in `remembrall-uninstall.sh`
 - Session Intelligence (Pensieve) section appended to handoff files
@@ -88,7 +88,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Changed
 - Handoff files now include `## Session Intelligence (Pensieve)` section with distilled session data
 - Session-resume injects Pensieve memory on ALL session starts (fresh + compact + clear)
-- Session-resume spawns insights aggregation in background
+- Session-resume spawns statistics aggregation in background
 - Context-monitor checks for Patrol signals before threshold comparison
 - Context-monitor spawns obliviate analyzer at journal threshold
 - Context-monitor spawns budget analyzer below journal threshold

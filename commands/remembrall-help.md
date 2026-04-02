@@ -18,7 +18,7 @@ Show the user this reference:
 | `/phoenix` | Toggle Phoenix mode on/off — recurring context recycling |
 | `/map` | The Marauder's Map — visual session overview |
 | `/lineage` | Session ancestry DAG — see how sessions branch and chain |
-| `/insights` | Ambient learning — file hotspots, patterns, recurring errors |
+| `/statistics` | Ambient learning — file hotspots, patterns, recurring errors |
 | `/obliviate` | Memory pruning — analyze and archive stale memories |
 | `/budget` | Context budget — code vs conversation vs memory breakdown |
 
@@ -50,9 +50,9 @@ Show the user this reference:
 | `threshold_timeturner` | `30` | Context % to trigger Time-Turner |
 | `lineage` | `true` | Record session ancestry (parent/child chains) |
 | `lineage_max_entries` | `50` | Max sessions to keep in lineage index |
-| `insights` | `true` | Aggregate Pensieve data into project insights |
-| `insights_inject` | `false` | Inject insights into session context |
-| `insights_min_sessions` | `3` | Min sessions before generating insights |
+| `statistics` | `true` | Aggregate Pensieve data into project statistics |
+| `statistics_inject` | `false` | Inject statistics into session context |
+| `statistics_min_sessions` | `3` | Min sessions before generating statistics |
 | `obliviate` | `true` | Analyze memories for staleness |
 | `obliviate_stale_sessions` | `5` | Sessions without update before memory is stale |
 | `budget_enabled` | `false` | Track context budget allocation (opt-in) |
@@ -84,7 +84,7 @@ Show the user this reference:
 
 **Lineage** (`/lineage`): Session ancestry graph showing parent-child chains, Time-Turner branches, and session status. Recorded automatically.
 
-**Insights** (`/insights`): Aggregates Pensieve data across sessions. Shows file hotspots, workflow patterns, recurring errors. Runs in background on session start.
+**Statistics** (`/statistics`): Aggregates Pensieve data across sessions. Shows file hotspots, workflow patterns, recurring errors. Runs in background on session start.
 
 **Obliviate** (`/obliviate`): Analyzes memory files for staleness. Cross-references with Pensieve data. Archives stale memories to `.archive/` with user confirmation.
 

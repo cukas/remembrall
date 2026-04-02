@@ -2401,46 +2401,46 @@ remembrall_config_set "lineage_max_entries" "50" 2>/dev/null && { printf "${GREE
 # Cleanup
 rm -f "$HOME/.remembrall/config.json" 2>/dev/null || true
 
-# ── Phase 2: Ambient Learning / Insights ─────────────────────────
+# ── Phase 2: Ambient Learning / Statistics ───────────────────────
 echo ""
-echo "Insights: lib.sh functions"
+echo "Statistics: lib.sh functions"
 echo "──────────────────────────"
 
-# remembrall_insights_dir
-IDIR=$(remembrall_insights_dir "/tmp/my-project")
-assert_match "insights dir under .remembrall/insights/<name>-<hash>" '\.remembrall/insights/my-project-[0-9a-f]{8}$' "$IDIR"
+# remembrall_statistics_dir
+IDIR=$(remembrall_statistics_dir "/tmp/my-project")
+assert_match "statistics dir under .remembrall/statistics/<name>-<hash>" '\.remembrall/statistics/my-project-[0-9a-f]{8}$' "$IDIR"
 
-IDIR2=$(remembrall_insights_dir "/tmp/my-project")
-assert_eq "insights dir deterministic" "$IDIR" "$IDIR2"
+IDIR2=$(remembrall_statistics_dir "/tmp/my-project")
+assert_eq "statistics dir deterministic" "$IDIR" "$IDIR2"
 
-# remembrall_insights_fresh
-INSIGHTS_CWD="$TMPDIR_ROOT/insights-test-project"
-mkdir -p "$INSIGHTS_CWD"
-INSIGHTS_TEST_DIR=$(remembrall_insights_dir "$INSIGHTS_CWD")
-mkdir -p "$INSIGHTS_TEST_DIR"
+# remembrall_statistics_fresh
+STATISTICS_CWD="$TMPDIR_ROOT/statistics-test-project"
+mkdir -p "$STATISTICS_CWD"
+STATISTICS_TEST_DIR=$(remembrall_statistics_dir "$STATISTICS_CWD")
+mkdir -p "$STATISTICS_TEST_DIR"
 
 # No file = not fresh
-if remembrall_insights_fresh "$INSIGHTS_CWD" 2>/dev/null; then
-  printf "${RED}  FAIL${RESET} insights_fresh returns false when no file\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - insights_fresh returns false when no file"
+if remembrall_statistics_fresh "$STATISTICS_CWD" 2>/dev/null; then
+  printf "${RED}  FAIL${RESET} statistics_fresh returns false when no file\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - statistics_fresh returns false when no file"
 else
-  printf "${GREEN}  PASS${RESET} insights_fresh returns false when no file\n"; PASS=$((PASS+1))
+  printf "${GREEN}  PASS${RESET} statistics_fresh returns false when no file\n"; PASS=$((PASS+1))
 fi
 
 # Fresh file = fresh
-echo '{}' > "$INSIGHTS_TEST_DIR/insights.json"
-if remembrall_insights_fresh "$INSIGHTS_CWD" 2>/dev/null; then
-  printf "${GREEN}  PASS${RESET} insights_fresh returns true for fresh file\n"; PASS=$((PASS+1))
+echo '{}' > "$STATISTICS_TEST_DIR/statistics.json"
+if remembrall_statistics_fresh "$STATISTICS_CWD" 2>/dev/null; then
+  printf "${GREEN}  PASS${RESET} statistics_fresh returns true for fresh file\n"; PASS=$((PASS+1))
 else
-  printf "${RED}  FAIL${RESET} insights_fresh returns true for fresh file\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - insights_fresh returns true for fresh file"
+  printf "${RED}  FAIL${RESET} statistics_fresh returns true for fresh file\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - statistics_fresh returns true for fresh file"
 fi
 
-# insights-aggregate.sh
+# statistics-aggregate.sh
 echo ""
-echo "Insights: insights-aggregate.sh"
+echo "Statistics: statistics-aggregate.sh"
 echo "────────────────────────────────"
-INSIGHTS_AGG_CWD="$TMPDIR_ROOT/insights-agg-project"
-mkdir -p "$INSIGHTS_AGG_CWD"
-PENSIEVE_AGG_DIR=$(remembrall_pensieve_dir "$INSIGHTS_AGG_CWD")
+STATISTICS_AGG_CWD="$TMPDIR_ROOT/statistics-agg-project"
+mkdir -p "$STATISTICS_AGG_CWD"
+PENSIEVE_AGG_DIR=$(remembrall_pensieve_dir "$STATISTICS_AGG_CWD")
 mkdir -p "$PENSIEVE_AGG_DIR"
 
 # Create 3 fake Pensieve sessions
@@ -2457,69 +2457,69 @@ for i in 1 2 3; do
 PENS_EOF
 done
 
-# Remove old insights so aggregator runs fresh
-rm -f "$(remembrall_insights_dir "$INSIGHTS_AGG_CWD")/insights.json" 2>/dev/null
+# Remove old statistics so aggregator runs fresh
+rm -f "$(remembrall_statistics_dir "$STATISTICS_AGG_CWD")/statistics.json" 2>/dev/null
 
-bash "$PLUGIN_ROOT/hooks/insights-aggregate.sh" "$INSIGHTS_AGG_CWD" 2>/dev/null
-INSIGHTS_AGG_FILE="$(remembrall_insights_dir "$INSIGHTS_AGG_CWD")/insights.json"
+bash "$PLUGIN_ROOT/hooks/statistics-aggregate.sh" "$STATISTICS_AGG_CWD" 2>/dev/null
+STATISTICS_AGG_FILE="$(remembrall_statistics_dir "$STATISTICS_AGG_CWD")/statistics.json"
 
-if [ -f "$INSIGHTS_AGG_FILE" ]; then
-  printf "${GREEN}  PASS${RESET} insights aggregation creates file\n"; PASS=$((PASS+1))
+if [ -f "$STATISTICS_AGG_FILE" ]; then
+  printf "${GREEN}  PASS${RESET} statistics aggregation creates file\n"; PASS=$((PASS+1))
 else
-  printf "${RED}  FAIL${RESET} insights aggregation creates file\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - insights aggregation creates file"
+  printf "${RED}  FAIL${RESET} statistics aggregation creates file\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - statistics aggregation creates file"
 fi
 
-I_AGG_SESSIONS=$(jq -r '.sessions_analyzed // 0' "$INSIGHTS_AGG_FILE" 2>/dev/null) || I_AGG_SESSIONS=0
-assert_eq "insights: 3 sessions analyzed" "3" "$I_AGG_SESSIONS"
+I_AGG_SESSIONS=$(jq -r '.sessions_analyzed // 0' "$STATISTICS_AGG_FILE" 2>/dev/null) || I_AGG_SESSIONS=0
+assert_eq "statistics: 3 sessions analyzed" "3" "$I_AGG_SESSIONS"
 
-I_HOTSPOT_COUNT=$(jq '.file_hotspots | length' "$INSIGHTS_AGG_FILE" 2>/dev/null) || I_HOTSPOT_COUNT=0
+I_HOTSPOT_COUNT=$(jq '.file_hotspots | length' "$STATISTICS_AGG_FILE" 2>/dev/null) || I_HOTSPOT_COUNT=0
 if [ "$I_HOTSPOT_COUNT" -gt 0 ]; then
-  printf "${GREEN}  PASS${RESET} insights: file hotspots detected\n"; PASS=$((PASS+1))
+  printf "${GREEN}  PASS${RESET} statistics: file hotspots detected\n"; PASS=$((PASS+1))
 else
-  printf "${RED}  FAIL${RESET} insights: file hotspots detected\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - insights: file hotspots detected"
+  printf "${RED}  FAIL${RESET} statistics: file hotspots detected\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - statistics: file hotspots detected"
 fi
 
-I_TOP_HOTSPOT=$(jq -r '.file_hotspots[0].file // ""' "$INSIGHTS_AGG_FILE" 2>/dev/null) || I_TOP_HOTSPOT=""
-assert_match "insights: top hotspot is a src file" "src/" "$I_TOP_HOTSPOT"
+I_TOP_HOTSPOT=$(jq -r '.file_hotspots[0].file // ""' "$STATISTICS_AGG_FILE" 2>/dev/null) || I_TOP_HOTSPOT=""
+assert_match "statistics: top hotspot is a src file" "src/" "$I_TOP_HOTSPOT"
 
-I_ERROR_COUNT=$(jq '.error_recurrence | length' "$INSIGHTS_AGG_FILE" 2>/dev/null) || I_ERROR_COUNT=0
+I_ERROR_COUNT=$(jq '.error_recurrence | length' "$STATISTICS_AGG_FILE" 2>/dev/null) || I_ERROR_COUNT=0
 if [ "$I_ERROR_COUNT" -gt 0 ]; then
-  printf "${GREEN}  PASS${RESET} insights: recurring errors detected\n"; PASS=$((PASS+1))
+  printf "${GREEN}  PASS${RESET} statistics: recurring errors detected\n"; PASS=$((PASS+1))
 else
-  printf "${RED}  FAIL${RESET} insights: recurring errors detected\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - insights: recurring errors detected"
+  printf "${RED}  FAIL${RESET} statistics: recurring errors detected\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - statistics: recurring errors detected"
 fi
 
-# insights: min_sessions guard
+# statistics: min_sessions guard
 echo ""
-echo "Insights: min_sessions guard"
+echo "Statistics: min_sessions guard"
 echo "─────────────────────────────"
-INSIGHTS_MIN_CWD="$TMPDIR_ROOT/insights-min-project"
-mkdir -p "$INSIGHTS_MIN_CWD"
-PENSIEVE_MIN_DIR=$(remembrall_pensieve_dir "$INSIGHTS_MIN_CWD")
+STATISTICS_MIN_CWD="$TMPDIR_ROOT/statistics-min-project"
+mkdir -p "$STATISTICS_MIN_CWD"
+PENSIEVE_MIN_DIR=$(remembrall_pensieve_dir "$STATISTICS_MIN_CWD")
 mkdir -p "$PENSIEVE_MIN_DIR"
 # Only 1 session (below default min of 3)
 cat > "$PENSIEVE_MIN_DIR/session-solo.json" << PMIN_EOF
 {"version": 1, "session_id": "solo", "files": {"app.ts": {"reads": 1}}, "commands": [], "errors": [], "patterns": {}}
 PMIN_EOF
-bash "$PLUGIN_ROOT/hooks/insights-aggregate.sh" "$INSIGHTS_MIN_CWD" 2>/dev/null
-if [ ! -f "$(remembrall_insights_dir "$INSIGHTS_MIN_CWD")/insights.json" ]; then
-  printf "${GREEN}  PASS${RESET} insights: skipped with < min_sessions\n"; PASS=$((PASS+1))
+bash "$PLUGIN_ROOT/hooks/statistics-aggregate.sh" "$STATISTICS_MIN_CWD" 2>/dev/null
+if [ ! -f "$(remembrall_statistics_dir "$STATISTICS_MIN_CWD")/statistics.json" ]; then
+  printf "${GREEN}  PASS${RESET} statistics: skipped with < min_sessions\n"; PASS=$((PASS+1))
 else
-  printf "${RED}  FAIL${RESET} insights: skipped with < min_sessions\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - insights: skipped with < min_sessions"
+  printf "${RED}  FAIL${RESET} statistics: skipped with < min_sessions\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - statistics: skipped with < min_sessions"
 fi
 
-# insights script output
+# statistics script output
 echo ""
-echo "Insights: remembrall-insights.sh"
+echo "Statistics: remembrall-statistics.sh"
 echo "──────────────────────────────────"
-INSIGHTS_SCRIPT_OUT=$(bash "$PLUGIN_ROOT/scripts/remembrall-insights.sh" "$INSIGHTS_AGG_CWD" 2>/dev/null)
-assert_match "insights script has header" "Pensieve Remembers|Project Insights" "$INSIGHTS_SCRIPT_OUT"
-assert_match "insights script shows sessions" "3 sessions" "$INSIGHTS_SCRIPT_OUT"
-assert_match "insights script shows hotspots" "Hotspot" "$INSIGHTS_SCRIPT_OUT"
+STATISTICS_SCRIPT_OUT=$(bash "$PLUGIN_ROOT/scripts/remembrall-statistics.sh" "$STATISTICS_AGG_CWD" 2>/dev/null)
+assert_match "statistics script has header" "Pensieve Remembers|Project Statistics" "$STATISTICS_SCRIPT_OUT"
+assert_match "statistics script shows sessions" "3 sessions" "$STATISTICS_SCRIPT_OUT"
+assert_match "statistics script shows hotspots" "Hotspot" "$STATISTICS_SCRIPT_OUT"
 
-# insights config validation
-remembrall_config_set "insights" "true" 2>/dev/null && { printf "${GREEN}  PASS${RESET} insights=true valid\n"; PASS=$((PASS+1)); } || { printf "${RED}  FAIL${RESET} insights=true valid\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - insights=true valid"; }
-remembrall_config_set "insights_min_sessions" "5" 2>/dev/null && { printf "${GREEN}  PASS${RESET} insights_min_sessions=5 valid\n"; PASS=$((PASS+1)); } || { printf "${RED}  FAIL${RESET} insights_min_sessions=5 valid\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - insights_min_sessions=5 valid"; }
+# statistics config validation
+remembrall_config_set "statistics" "true" 2>/dev/null && { printf "${GREEN}  PASS${RESET} statistics=true valid\n"; PASS=$((PASS+1)); } || { printf "${RED}  FAIL${RESET} statistics=true valid\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - statistics=true valid"; }
+remembrall_config_set "statistics_min_sessions" "5" 2>/dev/null && { printf "${GREEN}  PASS${RESET} statistics_min_sessions=5 valid\n"; PASS=$((PASS+1)); } || { printf "${RED}  FAIL${RESET} statistics_min_sessions=5 valid\n"; FAIL=$((FAIL+1)); ERRORS="${ERRORS}\n  - statistics_min_sessions=5 valid"; }
 rm -f "$HOME/.remembrall/config.json" 2>/dev/null || true
 
 # ── Phase 3: Obliviate ────────────────────────────────────────────
@@ -2857,7 +2857,7 @@ echo "────────────────────────�
 STATUS_CWD="$LINEAGE_CWD"  # Re-use lineage CWD which has data
 STATUS_OUT=$(bash "$PLUGIN_ROOT/scripts/remembrall-status.sh" "$STATUS_CWD" 2>/dev/null)
 assert_match "status shows Lineage" "Lineage:" "$STATUS_OUT"
-assert_match "status shows Insights" "Insights:" "$STATUS_OUT"
+assert_match "status shows Statistics" "Statistics:" "$STATUS_OUT"
 assert_match "status shows Obliviate" "Obliviate:" "$STATUS_OUT"
 assert_match "status shows Budget" "Budget:" "$STATUS_OUT"
 assert_match "status shows Patrol" "Patrol:" "$STATUS_OUT"
@@ -2868,7 +2868,7 @@ echo "Cross-feature: remembrall-help.md"
 echo "───────────────────────────────────"
 HELP_CONTENT=$(cat "$PLUGIN_ROOT/commands/remembrall-help.md")
 assert_match "help lists /lineage" "/lineage" "$HELP_CONTENT"
-assert_match "help lists /insights" "/insights" "$HELP_CONTENT"
+assert_match "help lists /statistics" "/statistics" "$HELP_CONTENT"
 assert_match "help lists /obliviate" "/obliviate" "$HELP_CONTENT"
 assert_match "help lists /budget" "/budget" "$HELP_CONTENT"
 assert_match "help lists patrol_integration config" "patrol_integration" "$HELP_CONTENT"

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # sourced by lib.sh
-# lib-features.sh — Lineage, Insights, Obliviate, Budget, Patrol, Phoenix
+# lib-features.sh — Lineage, Statistics, Obliviate, Budget, Patrol, Phoenix
 
 # ─── Session Lineage (v3.0.0) ──────────────────────────────────
 
@@ -133,30 +133,30 @@ remembrall_lineage_branches() {
   jq '[.sessions[] | select(.parent_id != "" and .parent_id != null) | .parent_id] | group_by(.) | map(select(length > 1)) | length' "$index" 2>/dev/null || echo "0"
 }
 
-# ─── Ambient Learning / Insights (v3.0.0) ───────────────────────
+# ─── Ambient Learning / Statistics (v3.0.0) ──────────────────────
 
-# Insights storage directory per project
-# Usage: remembrall_insights_dir "/path/to/project"
-remembrall_insights_dir() {
+# Statistics storage directory per project
+# Usage: remembrall_statistics_dir "/path/to/project"
+remembrall_statistics_dir() {
   local cwd="${1:-.}"
   local hash
   hash=$(remembrall_md5 "$cwd" | cut -c1-8)
   local name
   name=$(basename "$cwd")
   [ "$name" = "." ] && name="default"
-  echo "$HOME/.remembrall/insights/${name}-${hash}"
+  echo "$HOME/.remembrall/statistics/${name}-${hash}"
 }
 
-# Check if insights are fresh (< 1 hour old)
-# Usage: remembrall_insights_fresh "/path/to/project"
-remembrall_insights_fresh() {
+# Check if statistics are fresh (< 1 hour old)
+# Usage: remembrall_statistics_fresh "/path/to/project"
+remembrall_statistics_fresh() {
   local cwd="${1:-.}"
   local dir
-  dir=$(remembrall_insights_dir "$cwd")
-  local insights_file="$dir/insights.json"
-  [ -f "$insights_file" ] || return 1
+  dir=$(remembrall_statistics_dir "$cwd")
+  local statistics_file="$dir/statistics.json"
+  [ -f "$statistics_file" ] || return 1
   local age
-  age=$(remembrall_file_age "$insights_file")
+  age=$(remembrall_file_age "$statistics_file")
   [ "$age" -lt 3600 ]
 }
 

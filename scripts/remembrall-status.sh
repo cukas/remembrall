@@ -153,14 +153,14 @@ else
   echo "Lineage:  No data yet"
 fi
 
-# Insights
-INSIGHTS_DIR=$(remembrall_insights_dir "$CWD" 2>/dev/null) || INSIGHTS_DIR=""
-if [ -n "$INSIGHTS_DIR" ] && [ -f "$INSIGHTS_DIR/insights.json" ]; then
-  I_SESSIONS=$(jq -r '.sessions_analyzed // 0' "$INSIGHTS_DIR/insights.json" 2>/dev/null)
-  I_HOTSPOTS=$(jq '.file_hotspots | length' "$INSIGHTS_DIR/insights.json" 2>/dev/null) || I_HOTSPOTS=0
-  echo "Insights: $I_SESSIONS sessions analyzed, $I_HOTSPOTS hotspot(s)"
+# Statistics
+STATISTICS_DIR=$(remembrall_statistics_dir "$CWD" 2>/dev/null) || STATISTICS_DIR=""
+if [ -n "$STATISTICS_DIR" ] && [ -f "$STATISTICS_DIR/statistics.json" ]; then
+  I_SESSIONS=$(jq -r '.sessions_analyzed // 0' "$STATISTICS_DIR/statistics.json" 2>/dev/null)
+  I_HOTSPOTS=$(jq '.file_hotspots | length' "$STATISTICS_DIR/statistics.json" 2>/dev/null) || I_HOTSPOTS=0
+  echo "Statistics: $I_SESSIONS sessions analyzed, $I_HOTSPOTS hotspot(s)"
 else
-  echo "Insights: Not yet aggregated"
+  echo "Statistics: Not yet aggregated"
 fi
 
 # Obliviate
