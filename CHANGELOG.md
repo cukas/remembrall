@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+- `REMEMBRALL_OFF=1` environment variable disables all hooks for a single run (e.g. read-only headless review jobs that must not be forced into `/handoff`)
+
 ## [3.0.0] - 2026-03-13 — "The Session Never Dies"
 
 ### Added

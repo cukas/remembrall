@@ -325,6 +325,7 @@ remembrall_config_set() {
 remembrall_hook_enabled() {
   local hook_name="$1"
   local disabled
+  [ "${REMEMBRALL_OFF:-}" = "1" ] && return 1
   disabled=$(remembrall_config "disabled_hooks" "[]")
   if echo "$disabled" | jq -e --arg h "$hook_name" 'index($h)' >/dev/null 2>&1; then
     return 1
