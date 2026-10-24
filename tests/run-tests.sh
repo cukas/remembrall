@@ -495,6 +495,9 @@ assert_match "34% warning suggests /handoff" "/handoff" "$OUTPUT"
 OUTPUT=$(echo '{"session_id":"test-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
 assert_match "34% second time: persistent (no handoff yet)" "REMEMBRALL_WARN" "$OUTPUT"
 
+OUTPUT=$(echo '{"session_id":"test-sess","cwd":"'"$TEST_CWD"'"}' | REMEMBRALL_OFF=1 bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
+assert_eq "34% with REMEMBRALL_OFF=1: silent" "" "$OUTPUT"
+
 # 24% — urgent: AK fires (threshold default: 25)
 echo "24" > "$CTX_DIR/test-sess"
 OUTPUT=$(echo '{"session_id":"test-sess","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/context-monitor.sh" 2>/dev/null)
