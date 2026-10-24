@@ -233,6 +233,8 @@ Remembrall uses `~/.remembrall/config.json` for persistent settings. Run `/setup
 | `recency_window` | `60` | Seconds to look back when matching handoffs to sessions |
 | `debug` | `false` | Debug logging to `~/.remembrall/debug.log` |
 
+Set `REMEMBRALL_OFF=1` in the environment to disable all hooks for one run (e.g. read-only headless review jobs: `REMEMBRALL_OFF=1 claude -p "..."`).
+
 ### Threshold Settings
 
 | Setting | Default | Description |
