@@ -106,7 +106,7 @@ remembrall_publish_plugin_root
 
 # ── Version guard: clean stale temp files from old versions ──────
 PLUGIN_VERSION=$(jq -r '.version // empty' "$SCRIPT_DIR/../.claude-plugin/plugin.json" 2>/dev/null)
-if [ -n "$PLUGIN_VERSION" ] && [ "$PLUGIN_VERSION" != "3.0.0" ]; then
+if [ -n "$PLUGIN_VERSION" ] && [ "$PLUGIN_VERSION" != "3.0.1" ]; then
   [ -n "$SESSION_ID" ] && rm -f "/tmp/remembrall-nudges/$SESSION_ID" "/tmp/remembrall-bootstrap/$SESSION_ID" "/tmp/remembrall-growth/$SESSION_ID"
 fi
 

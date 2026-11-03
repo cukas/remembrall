@@ -1,7 +1,7 @@
 {
   "name": "remembrall",
   "description": "Context-aware session continuity for Claude Code — Pensieve session memory, Time-Turner parallel agents, Marauder's Map visualization, autonomous overnight runs, git patch snapshots, team handoffs, smart replay, and auto-resume",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "author": {
     "name": "cukas"
   },

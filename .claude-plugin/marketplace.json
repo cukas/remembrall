@@ -9,7 +9,7 @@
     {
       "name": "remembrall",
       "description": "Never lose work to context limits — Pensieve memory, Time-Turner parallel agents, auto-handoff, smart replay, git patches",
-      "version": "3.0.0",
+      "version": "3.0.1",
       "author": {
         "name": "cukas"
       },

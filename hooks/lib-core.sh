@@ -326,6 +326,8 @@ remembrall_hook_enabled() {
   local hook_name="$1"
   local disabled
   [ "${REMEMBRALL_OFF:-}" = "1" ] && return 1
+  # SDK / -p runs are one-shot jobs (e.g. read-only reviews): a handoff nudge there only breaks their output contract
+  case "${CLAUDE_CODE_ENTRYPOINT:-}" in sdk-*) return 1 ;; esac
   disabled=$(remembrall_config "disabled_hooks" "[]")
   if echo "$disabled" | jq -e --arg h "$hook_name" 'index($h)' >/dev/null 2>&1; then
     return 1

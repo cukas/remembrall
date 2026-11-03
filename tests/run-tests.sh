@@ -3,6 +3,7 @@
 # Usage: bash tests/run-tests.sh
 
 set -euo pipefail
+unset CLAUDE_CODE_ENTRYPOINT REMEMBRALL_OFF
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -720,6 +721,9 @@ assert_match "30% no handoff: enforces handoff" "MUST run /handoff" "$OUTPUT"
 
 OUTPUT=$(echo '{"session_id":"test-stop-sess","cwd":"'"$TEST_CWD"'"}' | REMEMBRALL_OFF=1 bash "$PLUGIN_ROOT/hooks/stop-check.sh" 2>&1)
 assert_eq "REMEMBRALL_OFF=1: no handoff enforcement" "" "$OUTPUT"
+
+OUTPUT=$(echo '{"session_id":"test-stop-sess","cwd":"'"$TEST_CWD"'"}' | CLAUDE_CODE_ENTRYPOINT=sdk-cli bash "$PLUGIN_ROOT/hooks/stop-check.sh" 2>&1)
+assert_eq "sdk-cli entrypoint: no handoff enforcement" "" "$OUTPUT"
 
 # Low context, with handoff — confirm auto-resume message via stderr
 STOP_HANDOFF_DIR=$(remembrall_handoff_dir "$TEST_CWD")
