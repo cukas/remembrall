@@ -121,7 +121,7 @@ ${PENSIEVE_SECTION}${HANDOFF_SECTION}Please review the above context and continu
   cd "$WORKTREE"
   unset CLAUDECODE 2>/dev/null || true
 
-  if claude -p "$PROMPT" \
+  if REMEMBRALL_OFF=0 claude -p "$PROMPT" \
     --output-format json \
     --dangerously-skip-permissions \
     --model "$MODEL" \

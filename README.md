@@ -233,7 +233,7 @@ Remembrall uses `~/.remembrall/config.json` for persistent settings. Run `/setup
 | `recency_window` | `60` | Seconds to look back when matching handoffs to sessions |
 | `debug` | `false` | Debug logging to `~/.remembrall/debug.log` |
 
-Set `REMEMBRALL_OFF=1` in the environment to disable all hooks for one run (e.g. a long scripted run). Headless SDK / `claude -p` runs (`CLAUDE_CODE_ENTRYPOINT=sdk-*`) skip all hooks automatically.
+Set `REMEMBRALL_OFF=1` in the environment to disable all hooks for one run (e.g. a long scripted run). Headless SDK / `claude -p` runs (`CLAUDE_CODE_ENTRYPOINT=sdk-*`) skip all hooks automatically; set `REMEMBRALL_OFF=0` to keep hooks on for such a run (Time-Turner agents do this).
 
 ### Threshold Settings
 

@@ -7,7 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [3.0.1] - 2026-11-03
 
 ### Added
-- All hooks skip runs whose `CLAUDE_CODE_ENTRYPOINT` is `sdk-*` (headless `claude -p` / SDK jobs), so one-shot review jobs are never forced into `/handoff`
+- All hooks skip runs whose `CLAUDE_CODE_ENTRYPOINT` is `sdk-*` (headless `claude -p` / SDK jobs), so one-shot review jobs are never forced into `/handoff`; `REMEMBRALL_OFF=0` keeps hooks on for an SDK run, and Time-Turner agents set it
 - `REMEMBRALL_OFF=1` environment variable disables all hooks for a single run (e.g. read-only headless review jobs that must not be forced into `/handoff`)
 
 ## [3.0.0] - 2026-03-13 — "The Session Never Dies"
