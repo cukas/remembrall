@@ -642,6 +642,25 @@ assert_eq "handoff file consumed after resume" "consumed" "$R"
 [ -f "$HANDOFF_DIR/handoff-test-resume.consumed.md" ] && R="renamed" || R="missing"
 assert_eq "consumed handoff renamed to .consumed.md" "renamed" "$R"
 
+touch -t 202001010000 "$HANDOFF_DIR/handoff-test-resume.consumed.md"
+cp "$HANDOFF_DIR/handoff-test-resume.consumed.md" "$HANDOFF_DIR/handoff-test-resume.md"
+touch -t 202001010000 "$HANDOFF_DIR/handoff-test-resume.md"
+echo '{"source":"compact","session_id":"test-resume","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/session-resume.sh" >/dev/null 2>&1
+[ -f "$HANDOFF_DIR/handoff-test-resume.md" ] && [ -f "$HANDOFF_DIR/handoff-test-resume.consumed.md" ] && R="kept" || R="deleted"
+assert_eq "stale and consumed handoffs never auto-deleted by default" "kept" "$R"
+remembrall_config_set "handoff_auto_cleanup" "true"
+echo '{"source":"compact","session_id":"test-resume","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/session-resume.sh" >/dev/null 2>&1
+[ ! -f "$HANDOFF_DIR/handoff-test-resume.md" ] && [ ! -f "$HANDOFF_DIR/handoff-test-resume.consumed.md" ] && R="deleted" || R="kept"
+assert_eq "handoff_auto_cleanup=true deletes stale and consumed handoffs" "deleted" "$R"
+remembrall_config_set "handoff_auto_cleanup" "false"
+
+echo "consumed v1" > "$HANDOFF_DIR/handoff-test-resume.consumed.md"
+printf -- '---\n{"session_id":"test-resume"}\n---\n# Session Handoff\n**Task:** v2\n' > "$HANDOFF_DIR/handoff-test-resume.md"
+echo '{"source":"compact","session_id":"test-resume","cwd":"'"$TEST_CWD"'"}' | bash "$PLUGIN_ROOT/hooks/session-resume.sh" >/dev/null 2>&1
+R=$(cat "$HANDOFF_DIR"/handoff-test-resume*.consumed.md | grep -cE "consumed v1|Task:\*\* v2")
+assert_eq "repeated resume does not overwrite earlier consumed handoff" "2" "$R"
+rm -f "$HANDOFF_DIR"/handoff-test-resume*.consumed.md
+
 # Cleanup
 rm -rf "$TEST_CWD" "$HANDOFF_DIR"
 
@@ -1391,6 +1410,19 @@ else
   printf "${RED}  FAIL${RESET} skill-generated handoff not overwritten by precompact\n"
   FAIL=$((FAIL + 1))
 fi
+
+PC_OLD="$PC_HANDOFF_DIR/handoff-test-pc-old.md"
+echo "old" > "$PC_OLD"; touch -t 202001010000 "$PC_OLD"
+echo '{"session_id":"test-pc-clean-1","cwd":"'"$TEST_CWD_PC"'","transcript_path":"'"$PC_TRANSCRIPT"'"}' | \
+  bash "$PLUGIN_ROOT/hooks/precompact-handoff.sh" >/dev/null 2>&1 || true
+[ -f "$PC_OLD" ] && R="kept" || R="deleted"
+assert_eq "precompact never deletes stale handoffs by default" "kept" "$R"
+remembrall_config_set "handoff_auto_cleanup" "true"
+echo '{"session_id":"test-pc-clean-2","cwd":"'"$TEST_CWD_PC"'","transcript_path":"'"$PC_TRANSCRIPT"'"}' | \
+  bash "$PLUGIN_ROOT/hooks/precompact-handoff.sh" >/dev/null 2>&1 || true
+[ -f "$PC_OLD" ] && R="kept" || R="deleted"
+assert_eq "precompact deletes stale handoffs when handoff_auto_cleanup=true" "deleted" "$R"
+remembrall_config_set "handoff_auto_cleanup" "false"
 
 rm -rf "$TEST_CWD_PC"
 

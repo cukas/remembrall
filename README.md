@@ -189,6 +189,7 @@ Remembrall uses `~/.remembrall/config.json` for persistent settings. Run `/setup
   "team_handoffs": false,
   "autonomous_mode": false,
   "retention_hours": 72,
+  "handoff_auto_cleanup": false,
   "easter_eggs": true,
   "threshold_journal": 65,
   "threshold_warning": 35,
@@ -226,7 +227,8 @@ Remembrall uses `~/.remembrall/config.json` for persistent settings. Run `/setup
 | `git_integration` | `false` | Save git patches of session-touched files before handoff |
 | `team_handoffs` | `false` | Copy handoffs to project-local `.remembrall/handoffs/` |
 | `autonomous_mode` | `false` | Skip plan mode — use `/handoff` + auto-compaction instead |
-| `retention_hours` | `72` | Hours to keep handoff files before auto-cleanup |
+| `retention_hours` | `72` | Max handoff age to auto-resume; with `handoff_auto_cleanup` also the deletion age |
+| `handoff_auto_cleanup` | `false` | Delete stale/consumed handoffs automatically. Off = handoffs are only removed by you |
 | `max_transcript_kb` | *(auto)* | Override max transcript size in KB |
 | `easter_eggs` | `true` | Harry Potter spell mappings in context nudges |
 | `disabled_hooks` | `[]` | Array of hook names to disable |

@@ -248,16 +248,18 @@ if [ ! -d "$HANDOFF_DIR" ]; then
   exit 0
 fi
 
-# Clean up orphaned .claimed-PID and .consumed files
-for f in "$HANDOFF_DIR"/handoff-*.md.claimed-* "$HANDOFF_DIR"/handoff-*.consumed.md; do
-  [ -f "$f" ] || continue
-  _age=$(remembrall_file_age "$f")
-  # claimed files: 5 min; consumed files: 1 hour
-  case "$f" in
-    *.claimed-*) [ "$_age" -gt 300 ] && rm -f "$f" ;;
-    *.consumed*) [ "$_age" -gt 3600 ] && rm -f "$f" ;;
-  esac
-done
+# Deleting old .claimed-PID / .consumed handoffs is opt-in (handoff_auto_cleanup=true)
+if remembrall_handoff_auto_cleanup; then
+  for f in "$HANDOFF_DIR"/handoff-*.md.claimed-* "$HANDOFF_DIR"/handoff-*.consumed.md; do
+    [ -f "$f" ] || continue
+    _age=$(remembrall_file_age "$f")
+    # claimed files: 5 min; consumed files: 1 hour
+    case "$f" in
+      *.claimed-*) [ "$_age" -gt 300 ] && rm -f "$f" ;;
+      *.consumed*) [ "$_age" -gt 3600 ] && rm -f "$f" ;;
+    esac
+  done
+fi
 
 # Only resume own session's handoff — use /replay for other sessions' handoffs
 HANDOFF_FILE=""
@@ -301,7 +303,7 @@ RETENTION_HOURS=$(remembrall_retention_hours)
 RETENTION_SECS=$((RETENTION_HOURS * 3600))
 FILE_AGE=$(remembrall_file_age "$HANDOFF_FILE")
 if [ "$FILE_AGE" -gt "$RETENTION_SECS" ]; then
-  rm -f "$HANDOFF_FILE"
+  remembrall_handoff_auto_cleanup && rm -f "$HANDOFF_FILE"
   _emit_standing_instruction
   exit 0
 fi
@@ -382,8 +384,10 @@ cat <<EOF
 }
 EOF
 
-# Rename consumed handoff (preserved for safety; cleaned up after 1 hour)
-mv "$CLAIMED_FILE" "${HANDOFF_FILE%.md}.consumed.md" 2>/dev/null || rm -f "$CLAIMED_FILE"
+# Rename consumed handoff; never overwrite an earlier consumed one (deleted later only if handoff_auto_cleanup=true)
+CONSUMED_FILE="${HANDOFF_FILE%.md}.consumed.md"
+[ -e "$CONSUMED_FILE" ] && CONSUMED_FILE="${HANDOFF_FILE%.md}.$(date +%s)-$$.consumed.md"
+mv "$CLAIMED_FILE" "$CONSUMED_FILE" 2>/dev/null || rm -f "$CLAIMED_FILE"
 
 # Clean up nudge + pensieve temp files for this session
 if [ -n "$SESSION_ID" ]; then

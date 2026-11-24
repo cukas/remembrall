@@ -39,7 +39,8 @@ Show the user this reference:
 | `git_integration` | `false` | Save git patches before handoff |
 | `team_handoffs` | `false` | Copy handoffs to project `.remembrall/` |
 | `autonomous_mode` | `true` | Skip plan mode for overnight/unattended runs |
-| `retention_hours` | `72` | Hours to keep handoffs before cleanup |
+| `retention_hours` | `72` | Max handoff age to auto-resume (deletion age if cleanup on) |
+| `handoff_auto_cleanup` | `false` | Auto-delete stale/consumed handoffs (off = manual only) |
 | `max_transcript_kb` | *(auto)* | Override max transcript size (rarely needed — bridge calibration handles this) |
 | `pensieve` | `true` | Track session intelligence (files, commands, errors) |
 | `pensieve_max_sessions` | `3` | Past sessions to inject on resume |

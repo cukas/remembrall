@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [3.1.0] - 2026-11-24
+
+### Changed
+- Handoffs are never deleted automatically by default. Stale (past `retention_hours`) and consumed handoffs are kept; set `handoff_auto_cleanup: true` to restore the old auto-deletion
+- A repeated resume no longer overwrites an earlier `.consumed.md` handoff
+
+### Fixed
+- Session chaining no longer picks `.consumed.md` handoffs as the previous session
+
 ## [3.0.1] - 2026-11-03
 
 ### Added

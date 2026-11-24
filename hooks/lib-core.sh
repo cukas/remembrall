@@ -260,7 +260,7 @@ remembrall_config_validate() {
         *) echo "remembrall: invalid $key '$value' — must be sonnet, opus, or haiku" >&2; return 1 ;;
       esac
       ;;
-    autonomous_mode|git_integration|team_handoffs|easter_eggs|debug|pensieve|time_turner|phoenix_mode)
+    autonomous_mode|git_integration|team_handoffs|easter_eggs|debug|pensieve|time_turner|phoenix_mode|handoff_auto_cleanup)
       if [ "$value" != "true" ] && [ "$value" != "false" ]; then
         echo "remembrall: invalid $key '$value' — must be true or false" >&2
         return 1

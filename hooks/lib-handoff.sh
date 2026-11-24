@@ -77,6 +77,10 @@ remembrall_retention_hours() {
   fi
 }
 
+remembrall_handoff_auto_cleanup() {
+  [ "$(remembrall_config "handoff_auto_cleanup" "false")" = "true" ]
+}
+
 # Compute team handoff directory — same as personal (all centralized)
 # Team handoffs are distinguished by metadata, not location
 remembrall_team_handoff_dir() {
@@ -141,6 +145,7 @@ remembrall_previous_session() {
   local newest="" newest_file=""
   for f in "$handoff_dir"/handoff-*.md; do
     [ -f "$f" ] || continue
+    case "$f" in *.consumed.md) continue ;; esac
     # Skip our own session's handoff
     local basename
     basename=$(basename "$f" .md)

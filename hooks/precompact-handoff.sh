@@ -276,10 +276,10 @@ fi
 # Team copy is a no-op since v2.8.0 (all handoffs centralized in ~/.remembrall)
 # Team flag is preserved in frontmatter metadata only
 
-# Clean up stale handoffs based on configurable retention (default: 72h)
+# Stale-handoff deletion is opt-in (handoff_auto_cleanup=true)
 RETENTION_HOURS=$(remembrall_retention_hours)
 RETENTION_MINS=$((RETENTION_HOURS * 60))
-if [ "$RETENTION_MINS" -gt 0 ] 2>/dev/null; then
+if remembrall_handoff_auto_cleanup && [ "$RETENTION_MINS" -gt 0 ] 2>/dev/null; then
   find "$HANDOFF_DIR" -name "handoff-*.md" -mmin +"$RETENTION_MINS" -delete 2>/dev/null || true
 fi
 
