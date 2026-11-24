@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [3.1.0] - 2026-11-24
+## [3.0.2] - 2026-11-24
 
 ### Changed
 - Handoffs are never deleted automatically by default. Stale (past `retention_hours`) and consumed handoffs are kept; set `handoff_auto_cleanup: true` to restore the old auto-deletion
